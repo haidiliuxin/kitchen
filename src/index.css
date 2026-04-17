@@ -1,0 +1,113 @@
+:root {
+  --bg: #f8efe3;
+  --text: #5f4a36;
+  --text-strong: #2f241b;
+  --muted: #7d6751;
+  --muted-strong: #5f4a36;
+  --accent: #ea580c;
+  --accent-strong: #fb923c;
+  --accent-deep: #9a3412;
+  --heading:
+    'STZhongsong', 'Songti SC', 'Noto Serif SC', 'Source Han Serif SC', serif;
+  --body:
+    'Hiragino Sans GB', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC',
+    sans-serif;
+
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(251, 146, 60, 0.14), transparent 24%),
+    radial-gradient(circle at right center, rgba(245, 158, 11, 0.12), transparent 20%),
+    linear-gradient(180deg, #fff9f2 0%, #f8efe3 100%);
+  font: 16px/1.6 var(--body);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(251, 146, 60, 0.14), transparent 24%),
+    radial-gradient(circle at right center, rgba(245, 158, 11, 0.12), transparent 20%),
+    linear-gradient(180deg, #fff9f2 0%, #f8efe3 100%);
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(circle at center, black 30%, transparent 100%);
+  opacity: 0.3;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+h1,
+h2,
+h3,
+h4,
+strong {
+  color: var(--text-strong);
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--heading);
+  line-height: 1.15;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(3rem, 5vw, 4.6rem);
+}
+
+h2 {
+  margin: 0;
+  font-size: clamp(2rem, 4vw, 2.6rem);
+}
+
+h3 {
+  margin: 0;
+  font-size: 1.35rem;
+}
+
+p {
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+  transform: none;
+  box-shadow: none;
+}

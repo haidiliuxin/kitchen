@@ -1,0 +1,855 @@
+.app-shell {
+  width: min(1280px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 24px 0 40px;
+}
+
+.notice-banner,
+.status-card {
+  border: 1px solid rgba(122, 83, 52, 0.12);
+  border-radius: 22px;
+  background: rgba(255, 248, 238, 0.92);
+  box-shadow: 0 24px 50px rgba(94, 63, 39, 0.08);
+}
+
+.notice-banner {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding: 16px 18px;
+  margin-bottom: 18px;
+}
+
+.status-card {
+  padding: 24px;
+  display: grid;
+  gap: 12px;
+}
+
+.hero-banner,
+.discover-layout,
+.cook-layout,
+.finish-layout {
+  display: grid;
+  gap: 24px;
+}
+
+.hero-banner {
+  grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr);
+  align-items: stretch;
+  margin-bottom: 24px;
+}
+
+.hero-copy,
+.panel,
+.metric-card,
+.next-card {
+  border: 1px solid rgba(122, 83, 52, 0.12);
+  border-radius: 28px;
+  background: rgba(255, 248, 238, 0.92);
+  box-shadow: 0 24px 50px rgba(94, 63, 39, 0.08);
+}
+
+.hero-copy {
+  padding: 40px;
+  background:
+    radial-gradient(circle at top right, rgba(246, 173, 85, 0.22), transparent 35%),
+    linear-gradient(160deg, rgba(255, 251, 243, 0.95), rgba(255, 244, 227, 0.95));
+}
+
+.hero-text,
+.metric-card p,
+.section-heading p,
+.recipe-card-body p,
+.detail-block p,
+.info-card li,
+.voice-panel p,
+.chat-bubble p,
+.finish-copy,
+.next-card p {
+  color: var(--muted);
+}
+
+.hero-actions,
+.detail-actions,
+.timer-actions,
+.step-nav,
+.finish-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.hero-actions {
+  margin-top: 28px;
+}
+
+.hero-metrics {
+  display: grid;
+  gap: 16px;
+}
+
+.metric-card {
+  padding: 24px;
+}
+
+.metric-label,
+.section-kicker,
+.eyebrow,
+.demo-frame span,
+.info-card span,
+.next-card span,
+.last-command span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent-deep);
+}
+
+.section-kicker,
+.eyebrow {
+  margin-bottom: 12px;
+}
+
+.metric-card strong,
+.insight-card strong,
+.recipe-card-head h3,
+.step-title,
+.demo-frame strong,
+.info-card strong,
+.rescue-card strong,
+.next-card strong {
+  color: var(--text-strong);
+}
+
+.discover-layout {
+  grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr);
+}
+
+.cook-layout {
+  grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.9fr);
+  align-items: start;
+}
+
+.finish-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.panel {
+  padding: 24px;
+}
+
+.section-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: end;
+  margin-bottom: 20px;
+}
+
+.compact-heading {
+  margin-bottom: 16px;
+}
+
+.filter-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) repeat(2, minmax(140px, 0.45fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.search-field,
+.select-field {
+  display: grid;
+  gap: 8px;
+  color: var(--muted-strong);
+  font-size: 14px;
+}
+
+.search-field input,
+.select-field select,
+.chat-form textarea {
+  border-radius: 18px;
+  border: 1px solid rgba(122, 83, 52, 0.18);
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--text-strong);
+  padding: 14px 16px;
+  font: inherit;
+  resize: vertical;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
+}
+
+.search-field input:focus,
+.select-field select:focus,
+.chat-form textarea:focus {
+  outline: none;
+  border-color: rgba(234, 88, 12, 0.35);
+  box-shadow: 0 0 0 4px rgba(251, 146, 60, 0.16);
+}
+
+.card-list,
+.detail-stack,
+.rescue-list,
+.next-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.recipe-card {
+  border: 1px solid rgba(122, 83, 52, 0.12);
+  background: rgba(255, 252, 247, 0.95);
+  border-radius: 24px;
+  padding: 0;
+  text-align: left;
+  overflow: hidden;
+  cursor: pointer;
+  transition:
+    transform 0.24s ease,
+    box-shadow 0.24s ease,
+    border-color 0.24s ease;
+}
+
+.recipe-card:hover,
+.recipe-card-active {
+  transform: translateY(-2px);
+  border-color: rgba(234, 88, 12, 0.3);
+  box-shadow: 0 22px 40px rgba(94, 63, 39, 0.1);
+}
+
+.recipe-card-cover,
+.recipe-detail-hero {
+  padding: 24px;
+  color: #fff8ef;
+}
+
+.recipe-card-cover {
+  min-height: 128px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.recipe-card-cover span,
+.detail-scene {
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.9;
+}
+
+.recipe-card-cover strong,
+.recipe-detail-hero h2 {
+  font-size: 28px;
+  line-height: 1.15;
+}
+
+.recipe-card-body {
+  padding: 20px;
+  display: grid;
+  gap: 14px;
+}
+
+.recipe-card-head,
+.recipe-meta,
+.voice-header,
+.step-panel-head,
+.cook-header,
+.insight-grid,
+.step-insight-grid {
+  display: flex;
+  gap: 12px;
+}
+
+.recipe-card-head,
+.voice-header,
+.step-panel-head,
+.cook-header {
+  justify-content: space-between;
+  align-items: start;
+}
+
+.recipe-meta {
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.recipe-chip,
+.tag,
+.tool-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.recipe-chip {
+  background: rgba(254, 215, 170, 0.5);
+  color: var(--accent-deep);
+}
+
+.tag-row,
+.tool-row,
+.prompt-grid,
+.finish-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.tag,
+.tool-chip {
+  background: rgba(245, 233, 216, 0.75);
+  color: var(--muted-strong);
+}
+
+.recipe-detail-hero {
+  border-radius: 24px;
+}
+
+.recipe-detail-hero h2,
+.step-title {
+  margin: 0 0 12px;
+}
+
+.detail-block {
+  padding: 20px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(122, 83, 52, 0.1);
+}
+
+.insight-grid {
+  flex-direction: column;
+}
+
+.insight-card,
+.info-card,
+.coach-note,
+.voice-panel,
+.prompt-panel,
+.chat-panel,
+.rescue-panel,
+.demo-frame,
+.rescue-card {
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(122, 83, 52, 0.1);
+}
+
+.insight-card {
+  padding: 18px;
+}
+
+.ingredient-list,
+.step-preview-list,
+.chat-log,
+.info-card ul {
+  margin: 0;
+  padding: 0;
+}
+
+.ingredient-list {
+  list-style: none;
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.ingredient-list li,
+.step-preview-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.ingredient-list strong {
+  color: var(--text-strong);
+}
+
+.step-preview-list {
+  list-style: none;
+  display: grid;
+  gap: 14px;
+}
+
+.step-preview-list li {
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: start;
+}
+
+.step-preview-list li span {
+  width: 40px;
+  height: 40px;
+  border-radius: 16px;
+  background: rgba(251, 146, 60, 0.14);
+  color: var(--accent-deep);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+
+.rescue-list {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.rescue-card {
+  padding: 16px;
+}
+
+.detail-actions {
+  justify-content: space-between;
+  padding-inline: 8px;
+}
+
+.primary-button,
+.ghost-button,
+.toggle-button,
+.prompt-chip {
+  border: none;
+  cursor: pointer;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    background 0.2s ease;
+  font: inherit;
+}
+
+.primary-button,
+.ghost-button,
+.toggle-button {
+  padding: 14px 18px;
+  border-radius: 18px;
+}
+
+.primary-button {
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  color: #fff;
+  box-shadow: 0 14px 24px rgba(234, 88, 12, 0.22);
+}
+
+.primary-button:hover,
+.ghost-button:hover,
+.toggle-button:hover,
+.prompt-chip:hover {
+  transform: translateY(-1px);
+}
+
+.ghost-button {
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--text-strong);
+  border: 1px solid rgba(122, 83, 52, 0.12);
+}
+
+.small-button {
+  padding: 10px 14px;
+}
+
+.cook-header {
+  grid-column: 1 / -1;
+  padding: 20px 24px;
+  border: 1px solid rgba(122, 83, 52, 0.12);
+  border-radius: 24px;
+  background: rgba(255, 248, 238, 0.92);
+  box-shadow: 0 24px 50px rgba(94, 63, 39, 0.08);
+}
+
+.progress-block {
+  min-width: 170px;
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+
+.progress-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(245, 233, 216, 0.9);
+  overflow: hidden;
+}
+
+.progress-value {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+}
+
+.step-panel,
+.coach-panel {
+  display: grid;
+  gap: 20px;
+}
+
+.step-panel-head {
+  align-items: center;
+}
+
+.step-lead {
+  font-size: 24px;
+  line-height: 1.5;
+  color: var(--text-strong);
+  margin: 0;
+}
+
+.step-detail {
+  margin: 0;
+  color: var(--muted);
+}
+
+.step-video-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 24px;
+  background:
+    linear-gradient(180deg, rgba(255, 250, 244, 0.96), rgba(255, 239, 222, 0.88));
+  border: 1px solid rgba(122, 83, 52, 0.12);
+}
+
+.step-video-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.step-video-player {
+  width: 100%;
+  border-radius: 18px;
+  background: #1f160f;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
+.step-media-image {
+  display: block;
+  border: 1px solid rgba(122, 83, 52, 0.12);
+  background: rgba(255, 247, 237, 0.9);
+}
+
+.offline-video-player {
+  display: grid;
+  gap: 14px;
+}
+
+.offline-video-stage {
+  min-height: 220px;
+  border-radius: 18px;
+  padding: 20px;
+  display: grid;
+  align-content: space-between;
+  gap: 12px;
+  background:
+    radial-gradient(circle at top right, rgba(251, 146, 60, 0.22), transparent 28%),
+    linear-gradient(160deg, rgba(98, 51, 18, 0.96), rgba(46, 27, 12, 0.98));
+  color: #fff7ed;
+}
+
+.offline-video-stage strong {
+  font-size: 30px;
+  line-height: 1.2;
+}
+
+.offline-video-stage p {
+  margin: 0;
+  color: rgba(255, 247, 237, 0.88);
+}
+
+.offline-video-badge {
+  display: inline-flex;
+  width: fit-content;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255, 247, 237, 0.16);
+  color: #fed7aa;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.offline-video-dots {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.offline-video-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(122, 83, 52, 0.18);
+  cursor: pointer;
+}
+
+.offline-video-dot-active {
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  box-shadow: 0 6px 14px rgba(234, 88, 12, 0.22);
+}
+
+.step-video-caption {
+  margin: 0;
+  color: var(--muted);
+}
+
+.video-credit-link {
+  color: var(--accent-deep);
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.video-credit-link:hover {
+  text-decoration: underline;
+}
+
+.demo-board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.demo-frame {
+  padding: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 247, 237, 0.95), rgba(255, 237, 213, 0.7)),
+    radial-gradient(circle at top right, rgba(245, 158, 11, 0.18), transparent 40%);
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.step-insight-grid {
+  align-items: stretch;
+}
+
+.step-insight-grid > * {
+  flex: 1;
+}
+
+.info-card,
+.coach-note,
+.voice-panel,
+.prompt-panel,
+.chat-panel,
+.rescue-panel,
+.timer-card {
+  padding: 20px;
+}
+
+.emphasis-card {
+  background:
+    linear-gradient(180deg, rgba(255, 248, 238, 0.95), rgba(255, 236, 219, 0.78));
+}
+
+.info-card ul {
+  list-style: none;
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.info-card li::before {
+  content: '•';
+  color: var(--accent);
+  margin-right: 10px;
+}
+
+.timer-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  border-radius: 24px;
+  background:
+    linear-gradient(135deg, rgba(255, 247, 237, 0.95), rgba(255, 239, 222, 0.88));
+  border: 1px solid rgba(122, 83, 52, 0.1);
+}
+
+.timer-card h3 {
+  margin: 8px 0;
+  font-size: 42px;
+  line-height: 1;
+}
+
+.timer-actions {
+  justify-content: end;
+}
+
+.step-nav {
+  justify-content: space-between;
+}
+
+.toggle-button {
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text-strong);
+  border: 1px solid rgba(122, 83, 52, 0.14);
+}
+
+.toggle-active {
+  background: rgba(234, 88, 12, 0.12);
+  color: var(--accent-deep);
+  border-color: rgba(234, 88, 12, 0.24);
+}
+
+.last-command {
+  margin-top: 14px;
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 247, 237, 0.75);
+}
+
+.prompt-grid {
+  gap: 12px;
+}
+
+.prompt-chip {
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(255, 247, 237, 0.9);
+  color: var(--text-strong);
+  text-align: left;
+}
+
+.rescue-chip {
+  background: rgba(254, 226, 226, 0.92);
+}
+
+.chat-log {
+  list-style: none;
+  display: grid;
+  gap: 12px;
+  max-height: 300px;
+  overflow-y: auto;
+  margin-bottom: 16px;
+}
+
+.chat-bubble {
+  padding: 14px 16px;
+  border-radius: 18px;
+}
+
+.assistant-bubble {
+  background: rgba(255, 248, 238, 0.92);
+}
+
+.user-bubble {
+  background: rgba(255, 235, 205, 0.95);
+}
+
+.chat-bubble span {
+  font-size: 12px;
+  color: var(--accent-deep);
+}
+
+.chat-form {
+  display: grid;
+  gap: 12px;
+}
+
+.finish-panel {
+  padding: 40px;
+}
+
+.finish-copy {
+  max-width: 760px;
+}
+
+.finish-metrics {
+  margin: 28px 0;
+}
+
+.next-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-bottom: 24px;
+}
+
+.next-card {
+  padding: 20px;
+}
+
+.empty-state {
+  padding: 24px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px dashed rgba(122, 83, 52, 0.18);
+}
+
+@media (max-width: 1100px) {
+  .hero-banner,
+  .discover-layout,
+  .cook-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .progress-block {
+    width: 100%;
+    justify-items: start;
+  }
+}
+
+@media (max-width: 780px) {
+  .app-shell {
+    width: min(100%, calc(100% - 20px));
+    padding-top: 16px;
+  }
+
+  .notice-banner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hero-copy,
+  .panel,
+  .finish-panel {
+    padding: 20px;
+    border-radius: 22px;
+  }
+
+  .hero-copy h1,
+  .step-title {
+    font-size: 38px;
+  }
+
+  .section-heading,
+  .recipe-card-head,
+  .cook-header,
+  .step-panel-head,
+  .step-video-head,
+  .timer-card,
+  .step-nav,
+  .detail-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .filter-bar,
+  .demo-board,
+  .step-insight-grid,
+  .next-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .timer-card h3 {
+    font-size: 34px;
+  }
+
+  .step-lead {
+    font-size: 20px;
+  }
+}

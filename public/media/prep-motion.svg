@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 270" role="img" aria-labelledby="title desc">
+  <title id="title">备菜离线动作演示</title>
+  <desc id="desc">案板上切番茄和小葱的循环动画。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fff7ed"/>
+      <stop offset="100%" stop-color="#fed7aa"/>
+    </linearGradient>
+  </defs>
+  <rect width="480" height="270" rx="28" fill="url(#bg)"/>
+  <rect x="70" y="86" width="340" height="124" rx="24" fill="#b45309"/>
+  <rect x="88" y="102" width="304" height="90" rx="18" fill="#f4d3a5"/>
+  <g>
+    <ellipse cx="180" cy="148" rx="38" ry="26" fill="#ef4444"/>
+    <ellipse cx="232" cy="148" rx="38" ry="26" fill="#f97316"/>
+    <ellipse cx="284" cy="148" rx="38" ry="26" fill="#22c55e"/>
+  </g>
+  <g>
+    <rect x="136" y="132" width="10" height="34" rx="5" fill="#7c2d12">
+      <animate attributeName="x" values="136;184;232;280;136" dur="3.2s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="146" y="122" width="42" height="10" rx="5" fill="#e5e7eb">
+      <animate attributeName="x" values="146;194;242;290;146" dur="3.2s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+  <g fill="#ffffff" font-family="Arial, sans-serif">
+    <text x="34" y="42" font-size="18" opacity="0.72">离线动作短片</text>
+    <text x="34" y="68" font-size="28" font-weight="700" fill="#7c2d12">先把食材备齐</text>
+    <text x="34" y="234" font-size="18" fill="#7c2d12">切番茄、切小葱、调料放手边</text>
+  </g>
+</svg>

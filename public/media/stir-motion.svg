@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 270" role="img" aria-labelledby="title desc">
+  <title id="title">翻炒离线动作演示</title>
+  <desc id="desc">锅里食材翻炒和锅铲推动的循环动画。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fffbeb"/>
+      <stop offset="100%" stop-color="#fecaca"/>
+    </linearGradient>
+  </defs>
+  <rect width="480" height="270" rx="28" fill="url(#bg)"/>
+  <ellipse cx="240" cy="164" rx="140" ry="52" fill="#1f2937"/>
+  <ellipse cx="240" cy="164" rx="116" ry="36" fill="#374151"/>
+  <g>
+    <circle cx="188" cy="160" r="16" fill="#ef4444">
+      <animate attributeName="cx" values="188;226;262;214;188" dur="2.8s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="230" cy="152" r="14" fill="#f59e0b">
+      <animate attributeName="cx" values="230;270;210;250;230" dur="2.8s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="272" cy="166" r="12" fill="#22c55e">
+      <animate attributeName="cx" values="272;210;286;232;272" dur="2.8s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+  <g>
+    <rect x="318" y="94" width="14" height="98" rx="7" fill="#7c2d12" transform="rotate(18 325 143)"/>
+    <path d="M290 154 Q318 126 350 128" fill="none" stroke="#d1d5db" stroke-width="18" stroke-linecap="round">
+      <animateTransform attributeName="transform" type="rotate" values="0 320 144;8 320 144;0 320 144" dur="2.8s" repeatCount="indefinite"/>
+    </path>
+  </g>
+  <g fill="#fff" font-family="Arial, sans-serif">
+    <text x="34" y="42" font-size="18" opacity="0.72">离线动作短片</text>
+    <text x="34" y="68" font-size="28" font-weight="700" fill="#7c2d12">翻炒要稳不要急</text>
+    <text x="34" y="234" font-size="18" fill="#7c2d12">轻推、翻面、压汁，节奏均匀最重要</text>
+  </g>
+</svg>
