@@ -18,6 +18,9 @@ android/build
 gradle-*.zip
 *.local
 data/
+!data/
+data/*
+!data/kitchen.sqlite
 .env
 .env.*
 !.env.example
