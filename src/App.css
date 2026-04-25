@@ -28,6 +28,7 @@
 }
 
 .hero-banner,
+.import-panel,
 .discover-layout,
 .cook-layout,
 .finish-layout {
@@ -151,6 +152,25 @@
   gap: 16px;
   align-items: end;
   margin-bottom: 20px;
+}
+
+.import-panel {
+  margin-bottom: 24px;
+}
+
+.import-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.import-field {
+  margin: 0;
+}
+
+.import-button {
+  min-width: 220px;
 }
 
 .compact-heading {
@@ -839,6 +859,7 @@
   }
 
   .filter-bar,
+  .import-bar,
   .demo-board,
   .step-insight-grid,
   .next-grid {

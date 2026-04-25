@@ -23,9 +23,11 @@ function App() {
           selectedRecipe={app.selectedRecipe}
           recipesData={app.recipesData}
           searchQuery={app.searchQuery}
+          importUrl={app.importUrl}
           difficulty={app.difficulty}
           timeLimit={app.timeLimit}
           isRecipesLoading={app.isRecipesLoading}
+          isImportingRecipe={app.isImportingRecipe}
           isHistoryLoading={app.isHistoryLoading}
           recipesError={app.recipesError}
           historyCount={app.history.length}
@@ -37,6 +39,10 @@ function App() {
             app.setScreen('discover')
           }}
           onSearchQueryChange={app.setSearchQuery}
+          onImportUrlChange={app.setImportUrl}
+          onImportRecipe={() => {
+            void app.importRecipe()
+          }}
           onDifficultyChange={app.setDifficulty}
           onTimeLimitChange={app.setTimeLimit}
         />
@@ -52,6 +58,7 @@ function App() {
           voiceEnabled={app.voiceEnabled}
           voiceStatus={app.voiceStatus}
           lastVoiceCommand={app.lastVoiceCommand}
+          wakeWords={app.wakeWords}
           liveCoachNote={app.liveCoachNote}
           messages={app.messages}
           quickPrompts={app.quickPrompts}

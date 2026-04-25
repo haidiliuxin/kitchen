@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="860" viewBox="0 0 1400 860">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#fffaf2" />
+      <stop offset="100%" stop-color="#fff2e2" />
+    </linearGradient>
+    <linearGradient id="card" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#fffefc" />
+      <stop offset="100%" stop-color="#fff7ef" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0%" stop-color="#ffb26b" />
+      <stop offset="100%" stop-color="#ff7d31" />
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#e8b98f" flood-opacity="0.28" />
+    </filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#d97832" />
+    </marker>
+    <style>
+      .title { font: 700 34px 'Microsoft YaHei', 'PingFang SC', sans-serif; fill: #5a2d10; }
+      .subtitle { font: 500 18px 'Microsoft YaHei', 'PingFang SC', sans-serif; fill: #8c5d3b; }
+      .card-title { font: 700 24px 'Microsoft YaHei', 'PingFang SC', sans-serif; fill: #5b3216; }
+      .card-text { font: 500 18px 'Microsoft YaHei', 'PingFang SC', sans-serif; fill: #7b5638; }
+      .tag { font: 700 15px 'Microsoft YaHei', 'PingFang SC', sans-serif; fill: #ffffff; }
+      .loop { font: 700 18px 'Microsoft YaHei', 'PingFang SC', sans-serif; fill: #c56221; }
+    </style>
+  </defs>
+
+  <rect width="1400" height="860" rx="28" fill="url(#bg)" />
+  <text x="84" y="78" class="title">流程 1：从选菜到完成跟做</text>
+  <text x="84" y="112" class="subtitle">展示用户从搜索、筛选、进入跟做，到完成记录与推荐闭环的核心主链路</text>
+
+  <rect x="84" y="150" width="220" height="120" rx="28" fill="url(#accent)" filter="url(#shadow)" />
+  <text x="112" y="205" class="card-title" fill="#fff">1 进入首页</text>
+  <text x="112" y="238" class="card-text" fill="#fff7ef">浏览推荐菜谱</text>
+
+  <rect x="356" y="150" width="220" height="120" rx="28" fill="url(#card)" filter="url(#shadow)" />
+  <text x="388" y="205" class="card-title">2 搜索与筛选</text>
+  <text x="388" y="238" class="card-text">按难度和时长缩小范围</text>
+
+  <rect x="628" y="150" width="220" height="120" rx="28" fill="url(#card)" filter="url(#shadow)" />
+  <text x="660" y="205" class="card-title">3 查看详情</text>
+  <text x="660" y="238" class="card-text">材料、步骤、替代方案</text>
+
+  <rect x="900" y="150" width="220" height="120" rx="28" fill="url(#card)" filter="url(#shadow)" />
+  <text x="932" y="205" class="card-title">4 进入跟做模式</text>
+  <text x="932" y="238" class="card-text">切换为一步一屏</text>
+
+  <rect x="1080" y="340" width="220" height="120" rx="28" fill="url(#card)" filter="url(#shadow)" />
+  <text x="1112" y="395" class="card-title">5 当前步骤引导</text>
+  <text x="1112" y="428" class="card-text">动作说明与补救建议</text>
+
+  <rect x="808" y="340" width="220" height="120" rx="28" fill="url(#card)" filter="url(#shadow)" />
+  <text x="840" y="395" class="card-title">6 用户执行步骤</text>
+  <text x="840" y="428" class="card-text">边看边做，减少出错</text>
+
+  <rect x="536" y="340" width="220" height="120" rx="28" fill="url(#card)" filter="url(#shadow)" />
+  <text x="568" y="395" class="card-title">7 下一步 / 语音切换</text>
+  <text x="568" y="428" class="card-text">按钮或语音推进流程</text>
+
+  <rect x="264" y="340" width="220" height="120" rx="28" fill="url(#card)" filter="url(#shadow)" />
+  <text x="297" y="388" class="card-title">8 是否已完成全部步骤？</text>
+  <text x="297" y="423" class="card-text">未完成则继续循环</text>
+
+  <rect x="84" y="560" width="220" height="120" rx="28" fill="url(#card)" filter="url(#shadow)" />
+  <text x="116" y="615" class="card-title">9 写入完成记录</text>
+  <text x="116" y="648" class="card-text">保存做菜历史</text>
+
+  <rect x="356" y="560" width="220" height="120" rx="28" fill="url(#card)" filter="url(#shadow)" />
+  <text x="388" y="615" class="card-title">10 生成推荐</text>
+  <text x="388" y="648" class="card-text">推荐下一道适合的菜</text>
+
+  <rect x="628" y="560" width="300" height="120" rx="28" fill="#fff5eb" stroke="#f0c59d" stroke-width="2" />
+  <text x="660" y="612" class="card-title">交互价值</text>
+  <text x="660" y="646" class="card-text">从选菜、跟做、记录到推荐，</text>
+  <text x="660" y="674" class="card-text">形成完整的使用与数据闭环。</text>
+
+  <line x1="304" y1="210" x2="356" y2="210" stroke="#d97832" stroke-width="5" marker-end="url(#arrow)" />
+  <line x1="576" y1="210" x2="628" y2="210" stroke="#d97832" stroke-width="5" marker-end="url(#arrow)" />
+  <line x1="848" y1="210" x2="900" y2="210" stroke="#d97832" stroke-width="5" marker-end="url(#arrow)" />
+  <path d="M1120 270 C1160 290, 1190 305, 1190 340" fill="none" stroke="#d97832" stroke-width="5" marker-end="url(#arrow)" />
+  <line x1="1080" y1="400" x2="1028" y2="400" stroke="#d97832" stroke-width="5" marker-end="url(#arrow)" />
+  <line x1="808" y1="400" x2="756" y2="400" stroke="#d97832" stroke-width="5" marker-end="url(#arrow)" />
+  <line x1="536" y1="400" x2="484" y2="400" stroke="#d97832" stroke-width="5" marker-end="url(#arrow)" />
+  <path d="M264 400 C180 400, 160 470, 194 560" fill="none" stroke="#d97832" stroke-width="5" marker-end="url(#arrow)" />
+  <line x1="304" y1="620" x2="356" y2="620" stroke="#d97832" stroke-width="5" marker-end="url(#arrow)" />
+  <line x1="576" y1="620" x2="628" y2="620" stroke="#d97832" stroke-width="5" marker-end="url(#arrow)" />
+  <path d="M374 340 C374 285, 470 250, 520 300 C560 340, 540 420, 484 430" fill="none" stroke="#f0a05a" stroke-width="4" stroke-dasharray="10 8" marker-end="url(#arrow)" />
+  <text x="400" y="310" class="loop">未完成，继续下一步</text>
+
+  <rect x="1038" y="88" width="262" height="40" rx="20" fill="#fff0df" stroke="#f0c59d" />
+  <text x="1063" y="114" class="tag" fill="#c86a26">核心特色：一步一屏 + 历史记录闭环</text>
+</svg>

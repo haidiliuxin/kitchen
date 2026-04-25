@@ -73,3 +73,11 @@ export type RecipeFilters = {
   difficulty?: '全部' | Difficulty
   timeLimit?: '全部' | number
 }
+
+export type VoiceInterpretation = {
+  activated: boolean
+  wakeWords: string[]
+  transcript: string
+  cleanedTranscript: string
+  matchedWakeWord: string | null
+}

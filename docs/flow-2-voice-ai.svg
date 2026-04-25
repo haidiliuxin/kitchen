@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="920" viewBox="0 0 1400 920">
+  <defs>
+    <linearGradient id="bg2" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#fff9f0" />
+      <stop offset="100%" stop-color="#fff1e4" />
+    </linearGradient>
+    <linearGradient id="card2" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#fffefc" />
+      <stop offset="100%" stop-color="#fff7ef" />
+    </linearGradient>
+    <linearGradient id="accent2" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0%" stop-color="#ffb66d" />
+      <stop offset="100%" stop-color="#ff8035" />
+    </linearGradient>
+    <filter id="shadow2" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#e4b388" flood-opacity="0.28" />
+    </filter>
+    <marker id="arrow2" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#d97832" />
+    </marker>
+    <style>
+      .title { font: 700 34px 'Microsoft YaHei', 'PingFang SC', sans-serif; fill: #5a2d10; }
+      .subtitle { font: 500 18px 'Microsoft YaHei', 'PingFang SC', sans-serif; fill: #8c5d3b; }
+      .card-title { font: 700 24px 'Microsoft YaHei', 'PingFang SC', sans-serif; fill: #5b3216; }
+      .card-text { font: 500 18px 'Microsoft YaHei', 'PingFang SC', sans-serif; fill: #7b5638; }
+      .tag { font: 700 15px 'Microsoft YaHei', 'PingFang SC', sans-serif; fill: #ffffff; }
+      .branch { font: 700 18px 'Microsoft YaHei', 'PingFang SC', sans-serif; fill: #c56221; }
+    </style>
+  </defs>
+
+  <rect width="1400" height="920" rx="28" fill="url(#bg2)" />
+  <text x="84" y="78" class="title">流程 2：语音控制 + AI 厨房教练问答</text>
+  <text x="84" y="112" class="subtitle">展示语音控制、语音转文字、情境式问答、多模态反馈如何在厨房场景中协同工作</text>
+
+  <rect x="84" y="150" width="240" height="120" rx="28" fill="url(#accent2)" filter="url(#shadow2)" />
+  <text x="116" y="205" class="card-title" fill="#fff">1 开启语音控制</text>
+  <text x="116" y="238" class="card-text" fill="#fff7ef">用户进入监听状态</text>
+
+  <rect x="388" y="150" width="240" height="120" rx="28" fill="url(#card2)" filter="url(#shadow2)" />
+  <text x="420" y="205" class="card-title">2 系统监听语音</text>
+  <text x="420" y="238" class="card-text">等待命令或问题输入</text>
+
+  <rect x="692" y="150" width="260" height="120" rx="28" fill="url(#card2)" filter="url(#shadow2)" />
+  <text x="724" y="205" class="card-title">3 识别用户语音内容</text>
+  <text x="724" y="238" class="card-text">判断是命令还是提问</text>
+
+  <rect x="1040" y="120" width="260" height="150" rx="32" fill="#fff5eb" stroke="#f0c59d" stroke-width="2" />
+  <text x="1080" y="176" class="card-title">识别结果分流</text>
+  <text x="1080" y="214" class="card-text">A. 命令类：下一步、重复一遍、计时</text>
+  <text x="1080" y="246" class="card-text">B. 问答类：这一步做到什么程度算好？</text>
+
+  <rect x="1018" y="390" width="280" height="120" rx="28" fill="url(#card2)" filter="url(#shadow2)" />
+  <text x="1050" y="445" class="card-title">4A 执行语音命令</text>
+  <text x="1050" y="478" class="card-text">切步骤 / 重复朗读 / 计时</text>
+
+  <rect x="664" y="390" width="280" height="120" rx="28" fill="url(#card2)" filter="url(#shadow2)" />
+  <text x="696" y="445" class="card-title">4B 语音转文字</text>
+  <text x="696" y="478" class="card-text">把问题转成可处理文本</text>
+
+  <rect x="350" y="390" width="240" height="120" rx="28" fill="url(#card2)" filter="url(#shadow2)" />
+  <text x="382" y="445" class="card-title">5 发送给 AI 教练</text>
+  <text x="382" y="478" class="card-text">附带当前菜谱与步骤</text>
+
+  <rect x="84" y="390" width="200" height="120" rx="28" fill="url(#card2)" filter="url(#shadow2)" />
+  <text x="116" y="445" class="card-title">6 大模型生成回答</text>
+  <text x="116" y="478" class="card-text">给出情境化建议</text>
+
+  <rect x="84" y="620" width="240" height="120" rx="28" fill="url(#card2)" filter="url(#shadow2)" />
+  <text x="116" y="675" class="card-title">7 展示文字答案</text>
+  <text x="116" y="708" class="card-text">界面即时反馈</text>
+
+  <rect x="388" y="620" width="240" height="120" rx="28" fill="url(#card2)" filter="url(#shadow2)" />
+  <text x="420" y="675" class="card-title">8 语音朗读答案</text>
+  <text x="420" y="708" class="card-text">边做边听，无需看屏幕</text>
+
+  <rect x="692" y="620" width="280" height="120" rx="28" fill="#fff5eb" stroke="#f0c59d" stroke-width="2" />
+  <text x="724" y="670" class="card-title">多模态反馈</text>
+  <text x="724" y="704" class="card-text">文字 + 朗读 + 步骤状态 + 演示媒体</text>
+
+  <rect x="1036" y="620" width="264" height="120" rx="28" fill="#fff5eb" stroke="#f0c59d" stroke-width="2" />
+  <text x="1068" y="670" class="card-title">交互价值</text>
+  <text x="1068" y="704" class="card-text">不只是控制页面，更能在做菜中即时提问</text>
+
+  <line x1="324" y1="210" x2="388" y2="210" stroke="#d97832" stroke-width="5" marker-end="url(#arrow2)" />
+  <line x1="628" y1="210" x2="692" y2="210" stroke="#d97832" stroke-width="5" marker-end="url(#arrow2)" />
+  <line x1="952" y1="210" x2="1040" y2="210" stroke="#d97832" stroke-width="5" marker-end="url(#arrow2)" />
+
+  <path d="M1170 270 C1170 320, 1158 350, 1158 390" fill="none" stroke="#d97832" stroke-width="5" marker-end="url(#arrow2)" />
+  <path d="M1080 270 C1010 320, 880 355, 804 390" fill="none" stroke="#d97832" stroke-width="5" marker-end="url(#arrow2)" />
+  <text x="1188" y="344" class="branch">命令类</text>
+  <text x="932" y="334" class="branch">问答类</text>
+
+  <line x1="664" y1="450" x2="590" y2="450" stroke="#d97832" stroke-width="5" marker-end="url(#arrow2)" />
+  <line x1="350" y1="450" x2="284" y2="450" stroke="#d97832" stroke-width="5" marker-end="url(#arrow2)" />
+  <path d="M184 510 C184 560, 184 580, 204 620" fill="none" stroke="#d97832" stroke-width="5" marker-end="url(#arrow2)" />
+  <line x1="324" y1="680" x2="388" y2="680" stroke="#d97832" stroke-width="5" marker-end="url(#arrow2)" />
+  <line x1="628" y1="680" x2="692" y2="680" stroke="#d97832" stroke-width="5" marker-end="url(#arrow2)" />
+  <line x1="972" y1="680" x2="1036" y2="680" stroke="#d97832" stroke-width="5" marker-end="url(#arrow2)" />
+
+  <path d="M1018 450 C920 520, 850 560, 820 620" fill="none" stroke="#f0a05a" stroke-width="4" stroke-dasharray="10 8" marker-end="url(#arrow2)" />
+  <text x="895" y="565" class="branch">执行命令后也会刷新页面状态</text>
+
+  <rect x="1040" y="88" width="260" height="40" rx="20" fill="#fff0df" stroke="#f0c59d" />
+  <text x="1066" y="114" class="tag" fill="#c86a26">核心特色：语音入口统一承载控制与问答</text>
+</svg>

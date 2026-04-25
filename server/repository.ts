@@ -339,3 +339,176 @@ export function getRecommendations(
     .map((row) => getRecipeById(db, row.id))
     .filter((recipe): recipe is Recipe => recipe !== null)
 }
+
+export function saveImportedRecipe(db: DatabaseSync, recipe: Recipe): Recipe {
+  db.exec('BEGIN')
+
+  try {
+    db.prepare(`
+      INSERT INTO recipes (
+        id,
+        title,
+        subtitle,
+        scene,
+        difficulty,
+        duration,
+        servings,
+        highlight,
+        risk_note,
+        description,
+        palette_start,
+        palette_end
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      recipe.id,
+      recipe.title,
+      recipe.subtitle,
+      recipe.scene,
+      recipe.difficulty,
+      recipe.duration,
+      recipe.servings,
+      recipe.highlight,
+      recipe.riskNote,
+      recipe.description,
+      recipe.palette.start,
+      recipe.palette.end,
+    )
+
+    const insertTag = db.prepare(`
+      INSERT INTO recipe_tags (recipe_id, sort_order, value)
+      VALUES (?, ?, ?)
+    `)
+    recipe.tags.forEach((tag, index) => {
+      insertTag.run(recipe.id, index, tag)
+    })
+
+    const insertSearchToken = db.prepare(`
+      INSERT INTO recipe_search_tokens (recipe_id, sort_order, value)
+      VALUES (?, ?, ?)
+    `)
+    recipe.searchTokens.forEach((token, index) => {
+      insertSearchToken.run(recipe.id, index, token)
+    })
+
+    const insertTool = db.prepare(`
+      INSERT INTO recipe_tools (recipe_id, sort_order, value)
+      VALUES (?, ?, ?)
+    `)
+    recipe.tools.forEach((tool, index) => {
+      insertTool.run(recipe.id, index, tool)
+    })
+
+    const insertIngredient = db.prepare(`
+      INSERT INTO ingredients (recipe_id, sort_order, name, amount)
+      VALUES (?, ?, ?, ?)
+    `)
+    recipe.ingredients.forEach((ingredient, index) => {
+      insertIngredient.run(recipe.id, index, ingredient.name, ingredient.amount)
+    })
+
+    const insertSubstitution = db.prepare(`
+      INSERT INTO substitutions (recipe_id, sort_order, ingredient, replacement, tip)
+      VALUES (?, ?, ?, ?, ?)
+    `)
+    recipe.substitutions.forEach((substitution, index) => {
+      insertSubstitution.run(
+        recipe.id,
+        index,
+        substitution.ingredient,
+        substitution.replacement,
+        substitution.tip,
+      )
+    })
+
+    const insertRescueTip = db.prepare(`
+      INSERT INTO rescue_tips (recipe_id, sort_order, issue, keywords_json, answer)
+      VALUES (?, ?, ?, ?, ?)
+    `)
+    recipe.rescueTips.forEach((tip, index) => {
+      insertRescueTip.run(
+        recipe.id,
+        index,
+        tip.issue,
+        JSON.stringify(tip.keywords),
+        tip.answer,
+      )
+    })
+
+    const insertStep = db.prepare(`
+      INSERT INTO steps (
+        recipe_id,
+        step_index,
+        title,
+        instruction,
+        detail,
+        duration_minutes,
+        sensory_cue,
+        voiceover
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    const insertStepCheckpoint = db.prepare(`
+      INSERT INTO step_checkpoints (recipe_id, step_index, sort_order, value)
+      VALUES (?, ?, ?, ?)
+    `)
+    const insertStepMistake = db.prepare(`
+      INSERT INTO step_common_mistakes (recipe_id, step_index, sort_order, value)
+      VALUES (?, ?, ?, ?)
+    `)
+    const insertStepDemoFrame = db.prepare(`
+      INSERT INTO step_demo_frames (recipe_id, step_index, sort_order, value)
+      VALUES (?, ?, ?, ?)
+    `)
+    const insertStepVideo = db.prepare(`
+      INSERT INTO step_videos (
+        recipe_id,
+        step_index,
+        video_url,
+        poster_url,
+        caption,
+        credit_label,
+        credit_url
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `)
+
+    recipe.steps.forEach((step, stepIndex) => {
+      insertStep.run(
+        recipe.id,
+        stepIndex,
+        step.title,
+        step.instruction,
+        step.detail,
+        step.durationMinutes,
+        step.sensoryCue,
+        step.voiceover,
+      )
+
+      step.checkpoints.forEach((value, index) => {
+        insertStepCheckpoint.run(recipe.id, stepIndex, index, value)
+      })
+      step.commonMistakes.forEach((value, index) => {
+        insertStepMistake.run(recipe.id, stepIndex, index, value)
+      })
+      step.demoFrames.forEach((value, index) => {
+        insertStepDemoFrame.run(recipe.id, stepIndex, index, value)
+      })
+
+      if (step.video) {
+        insertStepVideo.run(
+          recipe.id,
+          stepIndex,
+          step.video.url,
+          step.video.posterUrl ?? null,
+          step.video.caption,
+          step.video.creditLabel ?? null,
+          step.video.creditUrl ?? null,
+        )
+      }
+    })
+
+    db.exec('COMMIT')
+    return recipe
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
+}

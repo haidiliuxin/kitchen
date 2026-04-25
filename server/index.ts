@@ -4,18 +4,60 @@ import path from 'node:path'
 import express from 'express'
 import { getAiRuntimeInfo, getKitchenCoachReply } from './ai.js'
 import { createDatabase, databaseFilePath } from './database.js'
+import { importRecipeFromUrl } from './importer.js'
 import {
   getCookingHistory,
   getRecommendations,
   getRecipeById,
   listRecipes,
   recordCookingCompletion,
+  saveImportedRecipe,
 } from './repository.js'
 
 const port = Number(process.env.PORT ?? 8787)
 const host = process.env.HOST ?? '0.0.0.0'
 const app = express()
 const db = createDatabase()
+const configuredWakeWords = (process.env.VOICE_WAKE_WORDS ?? '小白下厨,小白教练')
+  .split(/[,\n]/)
+  .map((item) => item.trim())
+  .filter(Boolean)
+
+function normalizeSpeechText(value: string): string {
+  return value.replace(/[，。！？、；：,.!?;:"'“”‘’\s]/g, '').toLowerCase()
+}
+
+function interpretVoiceTranscript(transcript: string) {
+  const trimmedTranscript = transcript.trim()
+  const normalizedTranscript = normalizeSpeechText(trimmedTranscript)
+  const matchedWakeWord = configuredWakeWords.find((wakeWord) =>
+    normalizedTranscript.includes(normalizeSpeechText(wakeWord)),
+  )
+
+  if (!matchedWakeWord) {
+    return {
+      activated: false,
+      wakeWords: configuredWakeWords,
+      transcript: trimmedTranscript,
+      cleanedTranscript: '',
+      matchedWakeWord: null,
+    }
+  }
+
+  const matchedWakeWordNormalized = normalizeSpeechText(matchedWakeWord)
+  const cleanedTranscript = trimmedTranscript
+    .replace(new RegExp(matchedWakeWord, 'g'), '')
+    .trim()
+  const cleanedNormalizedTranscript = normalizedTranscript.replace(matchedWakeWordNormalized, '').trim()
+
+  return {
+    activated: true,
+    wakeWords: configuredWakeWords,
+    transcript: trimmedTranscript,
+    cleanedTranscript: cleanedTranscript || cleanedNormalizedTranscript,
+    matchedWakeWord,
+  }
+}
 
 app.use((request, response, next) => {
   const origin = typeof request.headers.origin === 'string' ? request.headers.origin : '*'
@@ -41,6 +83,9 @@ app.get('/api/health', (_request, response) => {
     status: 'ok',
     databaseFilePath,
     ai: getAiRuntimeInfo(),
+    voice: {
+      wakeWords: configuredWakeWords,
+    },
     timestamp: new Date().toISOString(),
   })
 })
@@ -108,6 +153,48 @@ app.get('/api/recommendations', (request, response) => {
       : undefined
 
   response.json(getRecommendations(db, excludeRecipeId))
+})
+
+app.post('/api/voice/interpret', (request, response) => {
+  const transcript = request.body?.transcript
+
+  if (typeof transcript !== 'string') {
+    response.status(400).json({ message: 'transcript 是必填项。' })
+    return
+  }
+
+  response.json(interpretVoiceTranscript(transcript))
+})
+
+app.post('/api/imports/from-link', async (request, response) => {
+  const url = request.body?.url
+
+  if (typeof url !== 'string' || !url.trim()) {
+    response.status(400).json({ message: 'url 是必填项。' })
+    return
+  }
+
+  try {
+    const imported = await importRecipeFromUrl(url.trim())
+    const savedRecipe = saveImportedRecipe(db, imported.recipe)
+
+    response.status(201).json({
+      recipe: savedRecipe,
+      generationMode: imported.generationMode ?? 'deepseek',
+      source: {
+        url: imported.source.url,
+        title: imported.source.title,
+        sourceType: imported.source.sourceType,
+      },
+    })
+  } catch (error) {
+    response.status(500).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : '链接导入失败，请稍后重试。',
+    })
+  }
 })
 
 app.post('/api/assistant/reply', async (request, response) => {

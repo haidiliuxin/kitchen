@@ -53,6 +53,7 @@
 
 - SQLite
 - DeepSeek Chat API
+- 本地 Whisper 转写服务（可选，用于视频链接 ASR）
 
 移动端：
 
@@ -108,7 +109,7 @@ cp .env.example .env
 DEEPSEEK_API_KEY=your_key
 DEEPSEEK_MODEL=deepseek-chat
 DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_TIMEOUT_MS=20000
+DEEPSEEK_TIMEOUT_MS=180000
 PORT=8787
 HOST=0.0.0.0
 ```
@@ -166,12 +167,60 @@ npm run start
 - `POST /api/history`
 - `GET /api/recommendations`
 - `POST /api/assistant/reply`
+- `POST /api/imports/from-link`
 
 其中：
 
 - `/api/recipes` 支持搜索、难度和时长筛选
 - `/api/assistant/reply` 用于当前步骤的 AI 教练问答
+- `/api/imports/from-link` 用于把文章或视频链接整理成菜谱
 - `/api/health` 会返回数据库路径、AI 提供方、模型和时间戳
+
+## 视频转攻略与 Whisper
+
+如果你想让 B 站、抖音这类“平台字幕不稳定”的视频也尽量提取出完整步骤，建议启动本地 Whisper 转写服务。
+
+仓库已经包含一套本地服务脚本，目录在：
+
+- `tools/whisper-service/`
+
+### 1. 安装 Whisper 服务依赖
+
+```powershell
+npm run whisper:setup
+```
+
+### 2. 启动 Whisper 服务
+
+```powershell
+npm run whisper:start
+```
+
+默认监听地址：
+
+- `http://127.0.0.1:8790`
+
+### 3. 主项目对接
+
+根目录 `.env` 已支持这个配置：
+
+```env
+VIDEO_TRANSCRIPT_WEBHOOK_URL=http://127.0.0.1:8790/transcribe
+```
+
+当这个地址可用时，后端导入器会优先：
+
+1. 把视频链接发给本地 Whisper 服务
+2. 由 Whisper 服务用 `yt-dlp` 抓取音频
+3. 做 ASR 转写
+4. 把字幕和元信息返回给主项目
+5. 再由主项目生成结构化做饭攻略
+
+这样做的好处是：
+
+- 不依赖平台是否公开字幕
+- 对 B 站、抖音视频更稳
+- Android 端以后也能直接复用这条后端能力
 
 ## 数据存储
 

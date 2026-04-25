@@ -11,8 +11,10 @@ import {
 import {
   askAssistant,
   fetchHistory,
+  importRecipeFromLink,
   fetchRecommendations,
   fetchRecipes,
+  interpretVoiceTranscript,
   recordCompletion,
 } from '../../lib/api.js'
 import {
@@ -69,6 +71,7 @@ export function useKitchenApp() {
   const [recipesData, setRecipesData] = useState<Recipe[]>([])
   const [recommendations, setRecommendations] = useState<Recipe[]>([])
   const [searchQuery, setSearchQuery] = useState('')
+  const [importUrl, setImportUrl] = useState('')
   const [difficulty, setDifficulty] = useState<'全部' | Difficulty>('全部')
   const [timeLimit, setTimeLimit] = useState<TimeLimit>('全部')
   const [currentStepIndex, setCurrentStepIndex] = useState(0)
@@ -79,11 +82,13 @@ export function useKitchenApp() {
   const [isTimerRunning, setIsTimerRunning] = useState(false)
   const [voiceEnabled, setVoiceEnabled] = useState(false)
   const [lastVoiceCommand, setLastVoiceCommand] = useState('')
+  const [wakeWords, setWakeWords] = useState(['小白下厨', '小白教练'])
   const [isRecipesLoading, setIsRecipesLoading] = useState(true)
   const [isHistoryLoading, setIsHistoryLoading] = useState(true)
   const [recipesError, setRecipesError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [isAssistantLoading, setIsAssistantLoading] = useState(false)
+  const [isImportingRecipe, setIsImportingRecipe] = useState(false)
   const [isFinishing, setIsFinishing] = useState(false)
   const [reloadNonce, setReloadNonce] = useState(0)
   const [recognitionSupported, setRecognitionSupported] = useState(
@@ -271,8 +276,6 @@ export function useKitchenApp() {
     const normalized = transcript.replace(/\s+/g, '')
     const minuteMatch = transcript.match(/(\d+)/)
 
-    setLastVoiceCommand(transcript)
-
     if (normalized.includes('下一步') || normalized.includes('继续')) {
       jumpToStep(currentStepIndex + 1)
       return true
@@ -305,19 +308,40 @@ export function useKitchenApp() {
     return false
   })
 
-  const handleSpokenInput = useEffectEvent((transcript: string) => {
+  const handleSpokenInput = useEffectEvent(async (transcript: string) => {
     const safeTranscript = transcript.trim()
     if (!safeTranscript) {
       return
     }
 
-    const handled = handleVoiceCommand(safeTranscript)
+    let interpretedTranscript = safeTranscript
+
+    try {
+      const interpretation = await interpretVoiceTranscript(safeTranscript)
+      setWakeWords(interpretation.wakeWords)
+
+      if (!interpretation.activated) {
+        return
+      }
+
+      interpretedTranscript = interpretation.cleanedTranscript.trim()
+      if (!interpretedTranscript) {
+        setNotice(`已唤醒语音助手，请继续说指令。当前唤醒词：${interpretation.wakeWords.join(' / ')}`)
+        return
+      }
+    } catch {
+      // If the backend interpreter is unavailable, fall back to the raw transcript.
+    }
+
+    setLastVoiceCommand(interpretedTranscript)
+
+    const handled = handleVoiceCommand(interpretedTranscript)
     if (handled) {
       return
     }
 
-    setAssistantInput(safeTranscript)
-    void submitAssistantQuestion(safeTranscript)
+    setAssistantInput(interpretedTranscript)
+    void submitAssistantQuestion(interpretedTranscript)
   })
 
   useEffect(() => {
@@ -538,6 +562,33 @@ export function useKitchenApp() {
     setNotice(null)
   }
 
+  const importRecipe = async () => {
+    const safeUrl = importUrl.trim()
+    if (!safeUrl) {
+      setNotice('请先粘贴攻略文章或视频链接。')
+      return
+    }
+
+    setIsImportingRecipe(true)
+    setNotice(null)
+
+    try {
+      const result = await importRecipeFromLink(safeUrl)
+      setImportUrl('')
+      setSelectedRecipeId(result.recipe.id)
+      setReloadNonce((previous) => previous + 1)
+      setNotice(`已从链接生成菜谱：${result.recipe.title}`)
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : '链接导入失败，请稍后再试。',
+      )
+    } finally {
+      setIsImportingRecipe(false)
+    }
+  }
+
   const voiceStatus: VoiceStatus = !recognitionSupported
     ? 'unsupported'
     : voiceEnabled && screen === 'cook'
@@ -555,6 +606,7 @@ export function useKitchenApp() {
     recipesData,
     recommendations,
     searchQuery,
+    importUrl,
     difficulty,
     timeLimit,
     currentStepIndex,
@@ -566,11 +618,13 @@ export function useKitchenApp() {
     isTimerRunning,
     voiceEnabled,
     lastVoiceCommand,
+    wakeWords,
     isRecipesLoading,
     isHistoryLoading,
     recipesError,
     notice,
     isAssistantLoading,
+    isImportingRecipe,
     isFinishing,
     quickPrompts,
     currentRecipeCompletions,
@@ -579,6 +633,7 @@ export function useKitchenApp() {
     setScreen,
     setSelectedRecipeId,
     setSearchQuery,
+    setImportUrl,
     setDifficulty,
     setTimeLimit,
     setAssistantInput,
@@ -592,6 +647,7 @@ export function useKitchenApp() {
     startCooking,
     finishCooking,
     retryLoading,
+    importRecipe,
     submitAssistantQuestion,
   }
 }

@@ -12,6 +12,7 @@ type CookScreenProps = {
   voiceEnabled: boolean
   voiceStatus: VoiceStatus
   lastVoiceCommand: string
+  wakeWords: string[]
   liveCoachNote: string
   messages: ChatMessage[]
   quickPrompts: string[]
@@ -38,6 +39,7 @@ export function CookScreen({
   voiceEnabled,
   voiceStatus,
   lastVoiceCommand,
+  wakeWords,
   liveCoachNote,
   messages,
   quickPrompts,
@@ -239,8 +241,8 @@ export function CookScreen({
             {voiceStatus === 'unsupported'
               ? '当前浏览器不支持语音识别，仍然可以点击按钮操作。'
               : voiceEnabled
-                ? '正在监听：你可以说“下一步”“重复一遍”“计时 3 分钟”。'
-                : '开启后可以用语音切换步骤、朗读步骤和启动计时。'}
+                ? `正在监听：请先说“${wakeWords.join('”或“')}”，再说“下一步”“重复一遍”或提问。`
+                : `开启后可以用语音切换步骤、朗读步骤和启动计时。当前唤醒词：${wakeWords.join(' / ')}。`}
           </p>
           {lastVoiceCommand && (
             <div className="last-command">

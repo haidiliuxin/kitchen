@@ -1,4 +1,9 @@
-import type { CookingHistoryEntry, Recipe, RecipeFilters } from '../types.js'
+import type {
+  CookingHistoryEntry,
+  Recipe,
+  RecipeFilters,
+  VoiceInterpretation,
+} from '../types.js'
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').trim()
 
@@ -87,4 +92,34 @@ export async function askAssistant(
   })
 
   return payload.answer
+}
+
+export async function interpretVoiceTranscript(
+  transcript: string,
+): Promise<VoiceInterpretation> {
+  return requestJson<VoiceInterpretation>('/api/voice/interpret', {
+    method: 'POST',
+    body: JSON.stringify({ transcript }),
+  })
+}
+
+export async function importRecipeFromLink(url: string): Promise<{
+  recipe: Recipe
+  source: {
+    url: string
+    title: string
+    sourceType: 'article' | 'video' | 'unknown'
+  }
+}> {
+  return requestJson<{
+    recipe: Recipe
+    source: {
+      url: string
+      title: string
+      sourceType: 'article' | 'video' | 'unknown'
+    }
+  }>('/api/imports/from-link', {
+    method: 'POST',
+    body: JSON.stringify({ url }),
+  })
 }

@@ -24,6 +24,10 @@ data/*
 .env
 .env.*
 !.env.example
+tools/whisper-service/.venv/
+tools/whisper-service/.cache/
+__pycache__/
+*.pyc
 
 # Editor directories and files
 .vscode/*
