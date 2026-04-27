@@ -103,6 +103,7 @@
 
 - `docs/flow-1-select-to-cook.svg`
 - `docs/flow-2-voice-ai.svg`
+- `docs/flow-3-import-to-guide.svg`
 - `docs/core-interaction-flow.md`
 
 ## 本地开发

@@ -42,3 +42,4 @@
 
 - `docs/flow-1-select-to-cook.svg`：从选菜或导入到完成跟做
 - `docs/flow-2-voice-ai.svg`：语音控制与 AI 厨房教练问答
+- `docs/flow-3-import-to-guide.svg`：从导入外部链接到生成结构化攻略
