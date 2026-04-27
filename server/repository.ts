@@ -34,6 +34,8 @@ type StepVideoRow = {
   caption: string
   credit_label: string | null
   credit_url: string | null
+  start_seconds: number | null
+  end_seconds: number | null
 }
 
 type TextValueRow = {
@@ -149,7 +151,7 @@ function assembleRecipe(db: DatabaseSync, row: RecipeRow): Recipe {
       ...(function () {
         const videoRow = db
           .prepare(`
-            SELECT video_url, poster_url, caption, credit_label, credit_url
+            SELECT video_url, poster_url, caption, credit_label, credit_url, start_seconds, end_seconds
             FROM step_videos
             WHERE recipe_id = ? AND step_index = ?
           `)
@@ -163,6 +165,8 @@ function assembleRecipe(db: DatabaseSync, row: RecipeRow): Recipe {
                 caption: videoRow.caption,
                 creditLabel: videoRow.credit_label ?? undefined,
                 creditUrl: videoRow.credit_url ?? undefined,
+                startSeconds: videoRow.start_seconds ?? undefined,
+                endSeconds: videoRow.end_seconds ?? undefined,
               }
             : undefined,
         }
@@ -466,8 +470,10 @@ export function saveImportedRecipe(db: DatabaseSync, recipe: Recipe): Recipe {
         poster_url,
         caption,
         credit_label,
-        credit_url
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        credit_url,
+        start_seconds,
+        end_seconds
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
 
     recipe.steps.forEach((step, stepIndex) => {
@@ -501,6 +507,8 @@ export function saveImportedRecipe(db: DatabaseSync, recipe: Recipe): Recipe {
           step.video.caption,
           step.video.creditLabel ?? null,
           step.video.creditUrl ?? null,
+          step.video.startSeconds ?? null,
+          step.video.endSeconds ?? null,
         )
       }
     })

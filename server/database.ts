@@ -138,6 +138,8 @@ function createTables(db: DatabaseSync): void {
       caption TEXT NOT NULL,
       credit_label TEXT,
       credit_url TEXT,
+      start_seconds REAL,
+      end_seconds REAL,
       PRIMARY KEY (recipe_id, step_index),
       FOREIGN KEY (recipe_id, step_index)
         REFERENCES steps(recipe_id, step_index)
@@ -154,6 +156,19 @@ function createTables(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_cooking_history_finished_at
       ON cooking_history (finished_at DESC);
   `)
+}
+
+function ensureStepVideoSegmentColumns(db: DatabaseSync): void {
+  const rows = db.prepare('PRAGMA table_info(step_videos)').all() as Array<{ name: string }>
+  const columnNames = new Set(rows.map((row) => row.name))
+
+  if (!columnNames.has('start_seconds')) {
+    db.exec('ALTER TABLE step_videos ADD COLUMN start_seconds REAL')
+  }
+
+  if (!columnNames.has('end_seconds')) {
+    db.exec('ALTER TABLE step_videos ADD COLUMN end_seconds REAL')
+  }
 }
 
 function getMetadata(db: DatabaseSync, key: string): string | null {
@@ -256,8 +271,10 @@ function seedRecipes(db: DatabaseSync): void {
         poster_url,
         caption,
         credit_label,
-        credit_url
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        credit_url,
+        start_seconds,
+        end_seconds
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
 
     for (const recipe of recipes) {
@@ -336,6 +353,8 @@ function seedRecipes(db: DatabaseSync): void {
             step.video.caption,
             step.video.creditLabel ?? null,
             step.video.creditUrl ?? null,
+            step.video.startSeconds ?? null,
+            step.video.endSeconds ?? null,
           )
         }
       })
@@ -354,6 +373,7 @@ export function createDatabase(): DatabaseSync {
 
   const db = new DatabaseSync(databaseFilePath)
   createTables(db)
+  ensureStepVideoSegmentColumns(db)
   seedRecipes(db)
   return db
 }

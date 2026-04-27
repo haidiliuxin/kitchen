@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 270" role="img" aria-labelledby="title desc">
+  <title id="title">鸡蛋下锅离线动作演示</title>
+  <desc id="desc">鸡蛋液倒入锅中并逐渐凝固的循环动画。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fff7ed"/>
+      <stop offset="100%" stop-color="#fdba74"/>
+    </linearGradient>
+  </defs>
+  <rect width="480" height="270" rx="28" fill="url(#bg)"/>
+  <ellipse cx="240" cy="160" rx="128" ry="56" fill="#292524"/>
+  <ellipse cx="240" cy="160" rx="108" ry="40" fill="#44403c"/>
+  <path d="M192 124 C224 102 274 102 298 128 C320 150 314 184 282 192 C248 202 198 194 180 170 C166 152 170 136 192 124Z" fill="#fef3c7">
+    <animate attributeName="d" dur="3.6s" repeatCount="indefinite"
+      values="M192 124 C224 102 274 102 298 128 C320 150 314 184 282 192 C248 202 198 194 180 170 C166 152 170 136 192 124Z;
+              M188 120 C230 96 282 102 306 132 C326 156 318 188 278 198 C238 208 184 196 166 164 C156 146 164 128 188 120Z;
+              M192 124 C224 102 274 102 298 128 C320 150 314 184 282 192 C248 202 198 194 180 170 C166 152 170 136 192 124Z"/>
+  </path>
+  <path d="M138 82 C160 78 176 84 186 96" stroke="#f8fafc" stroke-width="16" stroke-linecap="round" fill="none">
+    <animate attributeName="d" dur="3.6s" repeatCount="indefinite"
+      values="M138 82 C160 78 176 84 186 96; M136 76 C166 72 188 82 204 104; M138 82 C160 78 176 84 186 96"/>
+  </path>
+  <g fill="#fff" font-family="Arial, sans-serif">
+    <text x="34" y="42" font-size="18" opacity="0.72">离线动作短片</text>
+    <text x="34" y="68" font-size="28" font-weight="700" fill="#7c2d12">蛋液下锅先定型</text>
+    <text x="34" y="234" font-size="18" fill="#7c2d12">边缘微微凝固时再轻轻推散</text>
+  </g>
+</svg>

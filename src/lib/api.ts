@@ -1,18 +1,68 @@
 import type {
   CookingHistoryEntry,
+  ImportAnalyzeResponse,
+  ImportSourceType,
   Recipe,
   RecipeFilters,
   VoiceInterpretation,
 } from '../types.js'
 
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').trim()
+export const API_BASE_URL_STORAGE_KEY = 'kitchen-helper:api-base-url'
+
+const bundledApiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').trim()
+
+function normalizeApiBaseUrl(value: string): string {
+  return value.trim().replace(/\/+$/, '')
+}
+
+export function getConfiguredApiBaseUrl(): string {
+  if (typeof window === 'undefined') {
+    return normalizeApiBaseUrl(bundledApiBaseUrl)
+  }
+
+  const storedUrl = window.localStorage.getItem(API_BASE_URL_STORAGE_KEY)
+  return normalizeApiBaseUrl(storedUrl || bundledApiBaseUrl)
+}
+
+export function setConfiguredApiBaseUrl(value: string): string {
+  const normalized = normalizeApiBaseUrl(value)
+
+  if (typeof window !== 'undefined') {
+    if (normalized) {
+      window.localStorage.setItem(API_BASE_URL_STORAGE_KEY, normalized)
+    } else {
+      window.localStorage.removeItem(API_BASE_URL_STORAGE_KEY)
+    }
+  }
+
+  return normalized
+}
+
+export function resetConfiguredApiBaseUrl(): string {
+  return setConfiguredApiBaseUrl('')
+}
 
 function buildApiUrl(path: string): string {
+  const apiBaseUrl = getConfiguredApiBaseUrl()
+
   if (!apiBaseUrl) {
     return path
   }
 
   return `${apiBaseUrl.replace(/\/$/, '')}${path}`
+}
+
+export async function testApiServer(baseUrl = getConfiguredApiBaseUrl()): Promise<{
+  status: string
+}> {
+  const normalized = normalizeApiBaseUrl(baseUrl)
+  const response = await fetch(`${normalized}/api/health`)
+
+  if (!response.ok) {
+    throw new Error(`服务器返回 ${response.status}`)
+  }
+
+  return (await response.json()) as { status: string }
 }
 
 async function requestJson<T>(input: string, init?: RequestInit): Promise<T> {
@@ -121,5 +171,15 @@ export async function importRecipeFromLink(url: string): Promise<{
   }>('/api/imports/from-link', {
     method: 'POST',
     body: JSON.stringify({ url }),
+  })
+}
+
+export async function analyzeImportLink(
+  sourceType: ImportSourceType,
+  url: string,
+): Promise<ImportAnalyzeResponse> {
+  return requestJson<ImportAnalyzeResponse>('/api/imports/analyze', {
+    method: 'POST',
+    body: JSON.stringify({ sourceType, url }),
   })
 }

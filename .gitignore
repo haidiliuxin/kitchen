@@ -15,6 +15,7 @@ android/.gradle
 android/app/build
 android/build
 *.apk
+kitchen-helper.zip
 gradle-*.zip
 *.local
 data/
@@ -26,6 +27,7 @@ data/*
 !.env.example
 tools/whisper-service/.venv/
 tools/whisper-service/.cache/
+tools/cloudflared-tunnel/bin/
 __pycache__/
 *.pyc
 

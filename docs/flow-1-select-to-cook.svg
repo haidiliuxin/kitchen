@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="860" viewBox="0 0 1400 860">
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="940" viewBox="0 0 1400 940">
   <defs>
     <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
       <stop offset="0%" stop-color="#fffaf2" />
@@ -28,9 +28,9 @@
     </style>
   </defs>
 
-  <rect width="1400" height="860" rx="28" fill="url(#bg)" />
-  <text x="84" y="78" class="title">流程 1：从选菜到完成跟做</text>
-  <text x="84" y="112" class="subtitle">展示用户从搜索、筛选、进入跟做，到完成记录与推荐闭环的核心主链路</text>
+  <rect width="1400" height="940" rx="28" fill="url(#bg)" />
+  <text x="84" y="78" class="title">流程 1：从选菜或导入到完成跟做</text>
+  <text x="84" y="112" class="subtitle">展示用户从搜索筛选或外部内容导入开始，进入跟做、完成记录与推荐闭环的核心链路</text>
 
   <rect x="84" y="150" width="220" height="120" rx="28" fill="url(#accent)" filter="url(#shadow)" />
   <text x="112" y="205" class="card-title" fill="#fff">1 进入首页</text>
@@ -77,6 +77,22 @@
   <text x="660" y="646" class="card-text">从选菜、跟做、记录到推荐，</text>
   <text x="660" y="674" class="card-text">形成完整的使用与数据闭环。</text>
 
+  <rect x="84" y="740" width="220" height="120" rx="28" fill="url(#accent)" filter="url(#shadow)" />
+  <text x="116" y="795" class="card-title" fill="#fff">B1 导入视频 / 文档</text>
+  <text x="116" y="828" class="card-text" fill="#fff7ef">粘贴链接进入导入页</text>
+
+  <rect x="356" y="740" width="220" height="120" rx="28" fill="url(#card)" filter="url(#shadow)" />
+  <text x="388" y="795" class="card-title">B2 解析内容</text>
+  <text x="388" y="828" class="card-text">抓取正文、字幕或音频</text>
+
+  <rect x="628" y="740" width="220" height="120" rx="28" fill="url(#card)" filter="url(#shadow)" />
+  <text x="660" y="795" class="card-title">B3 生成结构化攻略</text>
+  <text x="660" y="828" class="card-text">整理成菜谱与步骤</text>
+
+  <rect x="900" y="740" width="220" height="120" rx="28" fill="url(#card)" filter="url(#shadow)" />
+  <text x="932" y="795" class="card-title">B4 进入详情 / 跟做</text>
+  <text x="932" y="828" class="card-text">接入主流程继续完成</text>
+
   <line x1="304" y1="210" x2="356" y2="210" stroke="#d97832" stroke-width="5" marker-end="url(#arrow)" />
   <line x1="576" y1="210" x2="628" y2="210" stroke="#d97832" stroke-width="5" marker-end="url(#arrow)" />
   <line x1="848" y1="210" x2="900" y2="210" stroke="#d97832" stroke-width="5" marker-end="url(#arrow)" />
@@ -90,6 +106,12 @@
   <path d="M374 340 C374 285, 470 250, 520 300 C560 340, 540 420, 484 430" fill="none" stroke="#f0a05a" stroke-width="4" stroke-dasharray="10 8" marker-end="url(#arrow)" />
   <text x="400" y="310" class="loop">未完成，继续下一步</text>
 
+  <line x1="304" y1="800" x2="356" y2="800" stroke="#d97832" stroke-width="5" marker-end="url(#arrow)" />
+  <line x1="576" y1="800" x2="628" y2="800" stroke="#d97832" stroke-width="5" marker-end="url(#arrow)" />
+  <line x1="848" y1="800" x2="900" y2="800" stroke="#d97832" stroke-width="5" marker-end="url(#arrow)" />
+  <path d="M1120 800 C1180 800, 1220 760, 1215 690 C1210 620, 1160 575, 928 575" fill="none" stroke="#f0a05a" stroke-width="4" stroke-dasharray="10 8" marker-end="url(#arrow)" />
+  <text x="1130" y="770" class="loop">生成后汇入已有菜谱主链路</text>
+
   <rect x="1038" y="88" width="262" height="40" rx="20" fill="#fff0df" stroke="#f0c59d" />
-  <text x="1063" y="114" class="tag" fill="#c86a26">核心特色：一步一屏 + 历史记录闭环</text>
+  <text x="1048" y="114" class="tag" fill="#c86a26">核心特色：导入生成攻略 + 一步一屏跟做闭环</text>
 </svg>

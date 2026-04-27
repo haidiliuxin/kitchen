@@ -11,7 +11,6 @@ import {
 import {
   askAssistant,
   fetchHistory,
-  importRecipeFromLink,
   fetchRecommendations,
   fetchRecipes,
   interpretVoiceTranscript,
@@ -56,6 +55,46 @@ type SpeechRecognitionLike = {
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
 
+const LOCAL_HISTORY_STORAGE_KEY = 'kitchen-helper:history'
+
+function readLocalHistory(): CookingHistoryEntry[] {
+  if (typeof window === 'undefined') {
+    return []
+  }
+
+  try {
+    const raw = window.localStorage.getItem(LOCAL_HISTORY_STORAGE_KEY)
+    if (!raw) {
+      return []
+    }
+
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+
+    return parsed.filter(
+      (item): item is CookingHistoryEntry =>
+        Boolean(item) &&
+        typeof item.id === 'string' &&
+        typeof item.recipeId === 'string' &&
+        typeof item.finishedAt === 'string',
+    )
+  } catch {
+    return []
+  }
+}
+
+function mergeHistoryEntries(...groups: CookingHistoryEntry[][]): CookingHistoryEntry[] {
+  const map = new Map<string, CookingHistoryEntry>()
+
+  groups.flat().forEach((entry) => {
+    map.set(entry.id, entry)
+  })
+
+  return [...map.values()].sort((left, right) => right.finishedAt.localeCompare(left.finishedAt))
+}
+
 declare global {
   interface Window {
     SpeechRecognition?: SpeechRecognitionConstructor
@@ -71,24 +110,23 @@ export function useKitchenApp() {
   const [recipesData, setRecipesData] = useState<Recipe[]>([])
   const [recommendations, setRecommendations] = useState<Recipe[]>([])
   const [searchQuery, setSearchQuery] = useState('')
-  const [importUrl, setImportUrl] = useState('')
   const [difficulty, setDifficulty] = useState<'全部' | Difficulty>('全部')
   const [timeLimit, setTimeLimit] = useState<TimeLimit>('全部')
   const [currentStepIndex, setCurrentStepIndex] = useState(0)
   const [assistantInput, setAssistantInput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [history, setHistory] = useState<CookingHistoryEntry[]>([])
+  const [history, setHistory] = useState<CookingHistoryEntry[]>(() => readLocalHistory())
   const [timerLeft, setTimerLeft] = useState(0)
   const [isTimerRunning, setIsTimerRunning] = useState(false)
   const [voiceEnabled, setVoiceEnabled] = useState(false)
   const [lastVoiceCommand, setLastVoiceCommand] = useState('')
   const [wakeWords, setWakeWords] = useState(['小白下厨', '小白教练'])
+  const [isNativeVoiceListening, setIsNativeVoiceListening] = useState(false)
   const [isRecipesLoading, setIsRecipesLoading] = useState(true)
   const [isHistoryLoading, setIsHistoryLoading] = useState(true)
   const [recipesError, setRecipesError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [isAssistantLoading, setIsAssistantLoading] = useState(false)
-  const [isImportingRecipe, setIsImportingRecipe] = useState(false)
   const [isFinishing, setIsFinishing] = useState(false)
   const [reloadNonce, setReloadNonce] = useState(0)
   const [recognitionSupported, setRecognitionSupported] = useState(
@@ -100,7 +138,8 @@ export function useKitchenApp() {
 
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const nativeRecognitionActiveRef = useRef(false)
-  const lastSpokenStepRef = useRef('')
+  const nativeRecognitionRestartTimerRef = useRef<number | null>(null)
+  const lastNativeTranscriptRef = useRef({ text: '', at: 0 })
   const deferredQuery = useDeferredValue(searchQuery)
 
   const selectedRecipe =
@@ -192,7 +231,7 @@ export function useKitchenApp() {
           return
         }
 
-        setHistory(nextHistory)
+        setHistory((previous) => mergeHistoryEntries(nextHistory, previous))
       } catch (error) {
         if (cancelled) {
           return
@@ -216,6 +255,18 @@ export function useKitchenApp() {
       cancelled = true
     }
   }, [reloadNonce])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    try {
+      window.localStorage.setItem(LOCAL_HISTORY_STORAGE_KEY, JSON.stringify(history))
+    } catch {
+      // Ignore storage write failures and keep in-memory state.
+    }
+  }, [history])
 
   useEffect(() => {
     if (!isTimerRunning) {
@@ -390,12 +441,55 @@ export function useKitchenApp() {
   }, [handleSpokenInput, recognitionMode, recognitionSupported, screen, voiceEnabled])
 
   useEffect(() => {
+    if (recognitionMode !== 'native') {
+      return
+    }
+
+    if (screen !== 'cook') {
+      if (nativeRecognitionRestartTimerRef.current !== null) {
+        window.clearTimeout(nativeRecognitionRestartTimerRef.current)
+        nativeRecognitionRestartTimerRef.current = null
+      }
+
+      nativeRecognitionActiveRef.current = false
+      setIsNativeVoiceListening(false)
+      setVoiceEnabled(false)
+      void SpeechRecognition.stop().catch(() => undefined)
+      void SpeechRecognition.removeAllListeners().catch(() => undefined)
+    }
+  }, [recognitionMode, screen])
+
+  useEffect(() => {
+    if (recognitionMode !== 'native') {
+      return
+    }
+
+    return () => {
+      if (nativeRecognitionRestartTimerRef.current !== null) {
+        window.clearTimeout(nativeRecognitionRestartTimerRef.current)
+        nativeRecognitionRestartTimerRef.current = null
+      }
+
+      nativeRecognitionActiveRef.current = false
+      setIsNativeVoiceListening(false)
+      void SpeechRecognition.stop().catch(() => undefined)
+      void SpeechRecognition.removeAllListeners().catch(() => undefined)
+    }
+  }, [recognitionMode])
+
+  useEffect(() => {
     if (!recognitionSupported || recognitionMode !== 'native') {
       return
     }
 
     if (!voiceEnabled || screen !== 'cook') {
+      if (nativeRecognitionRestartTimerRef.current !== null) {
+        window.clearTimeout(nativeRecognitionRestartTimerRef.current)
+        nativeRecognitionRestartTimerRef.current = null
+      }
+
       nativeRecognitionActiveRef.current = false
+      setIsNativeVoiceListening(false)
       void SpeechRecognition.stop().catch(() => undefined)
       void SpeechRecognition.removeAllListeners().catch(() => undefined)
       return
@@ -403,77 +497,128 @@ export function useKitchenApp() {
 
     let disposed = false
 
-    const startNativeRecognition = async () => {
-      if (nativeRecognitionActiveRef.current || disposed) {
+    const clearRestartTimer = () => {
+      if (nativeRecognitionRestartTimerRef.current !== null) {
+        window.clearTimeout(nativeRecognitionRestartTimerRef.current)
+        nativeRecognitionRestartTimerRef.current = null
+      }
+    }
+
+    const queueRestart = (delayMs = 1200) => {
+      if (disposed || !voiceEnabled || screen !== 'cook') {
+        return
+      }
+
+      clearRestartTimer()
+      nativeRecognitionRestartTimerRef.current = window.setTimeout(() => {
+        nativeRecognitionRestartTimerRef.current = null
+        void startListening()
+      }, delayMs)
+    }
+
+    const handleNativeMatches = (matches?: string[]) => {
+      const transcript = matches?.find((match) => match.trim())?.trim()
+      if (!transcript) {
+        return
+      }
+
+      const now = Date.now()
+      const last = lastNativeTranscriptRef.current
+      if (last.text === transcript && now - last.at < 1800) {
+        return
+      }
+
+      lastNativeTranscriptRef.current = { text: transcript, at: now }
+      void handleSpokenInput(transcript)
+    }
+
+    const startListening = async () => {
+      if (disposed || nativeRecognitionActiveRef.current) {
         return
       }
 
       nativeRecognitionActiveRef.current = true
 
       try {
-        const result = await SpeechRecognition.start({
+        await SpeechRecognition.start({
           language: 'zh-CN',
-          maxResults: 1,
-          partialResults: false,
-          popup: true,
+          maxResults: 3,
+          partialResults: true,
+          popup: false,
         })
-        const transcript = result.matches?.[0]?.trim()
-        if (transcript) {
-          handleSpokenInput(transcript)
-        }
-      } catch {
-        if (!disposed) {
-          setNotice('语音识别启动失败，请确认系统语音服务可用。')
-          setVoiceEnabled(false)
-        }
-      } finally {
+        setIsNativeVoiceListening(true)
+        setNotice(null)
+      } catch (error) {
         nativeRecognitionActiveRef.current = false
-        if (!disposed && voiceEnabled && screen === 'cook') {
-          window.setTimeout(() => {
-            void startNativeRecognition()
-          }, 250)
+        setIsNativeVoiceListening(false)
+
+        const rawMessage = error instanceof Error ? error.message : String(error)
+        const friendlyMessage =
+          /not available/i.test(rawMessage)
+            ? '当前手机没有可用的系统语音识别服务，请在系统设置中启用语音助手/语音输入。'
+            : /permission|insufficient/i.test(rawMessage)
+              ? '请在系统设置里允许小白下厨使用麦克风权限。'
+              : /busy/i.test(rawMessage)
+                ? '系统语音服务正忙，正在自动重试。'
+                : rawMessage
+                  ? `语音识别启动失败：${rawMessage}`
+                  : '语音识别启动失败，正在自动重试。'
+
+        setNotice(friendlyMessage)
+        if (!/not available|permission|insufficient/i.test(rawMessage)) {
+          queueRestart(/busy/i.test(rawMessage) ? 1800 : 2500)
+        } else {
+          setVoiceEnabled(false)
         }
       }
     }
 
-    const setupNativeRecognition = async () => {
+    const setupContinuousNativeRecognition = async () => {
+      await SpeechRecognition.stop().catch(() => undefined)
       await SpeechRecognition.removeAllListeners().catch(() => undefined)
-      await SpeechRecognition.addListener('listeningState', (data) => {
-        if (data.status === 'stopped') {
-          nativeRecognitionActiveRef.current = false
-        }
+      await SpeechRecognition.addListener('partialResults', (data) => {
+        handleNativeMatches(data.matches)
       })
-      await startNativeRecognition()
+      await SpeechRecognition.addListener('listeningState', (data) => {
+        if (data.status === 'started') {
+          nativeRecognitionActiveRef.current = true
+          setIsNativeVoiceListening(true)
+          return
+        }
+
+        nativeRecognitionActiveRef.current = false
+        setIsNativeVoiceListening(false)
+        queueRestart()
+      })
+      await startListening()
     }
 
-    void setupNativeRecognition()
+    void setupContinuousNativeRecognition()
 
     return () => {
       disposed = true
+      clearRestartTimer()
       nativeRecognitionActiveRef.current = false
+      setIsNativeVoiceListening(false)
       void SpeechRecognition.stop().catch(() => undefined)
       void SpeechRecognition.removeAllListeners().catch(() => undefined)
     }
   }, [handleSpokenInput, recognitionMode, recognitionSupported, screen, voiceEnabled])
 
-  useEffect(() => {
-    if (screen !== 'cook' || !currentStep || !selectedRecipe) {
-      return
-    }
-
-    const nextStepKey = `${selectedRecipe.id}:${currentStepIndex}`
-    if (lastSpokenStepRef.current === nextStepKey) {
-      return
-    }
-
-    lastSpokenStepRef.current = nextStepKey
-    void speak(`第 ${currentStepIndex + 1} 步，${currentStep.title}。${currentStep.voiceover}`).catch(() => {
-      setNotice('当前设备的文字朗读不可用，请检查系统语音引擎。')
-    })
-  }, [currentStep, currentStepIndex, screen, selectedRecipe])
-
   const toggleVoice = async () => {
     if (voiceEnabled) {
+      if (recognitionMode === 'native') {
+        if (nativeRecognitionRestartTimerRef.current !== null) {
+          window.clearTimeout(nativeRecognitionRestartTimerRef.current)
+          nativeRecognitionRestartTimerRef.current = null
+        }
+
+        nativeRecognitionActiveRef.current = false
+        setIsNativeVoiceListening(false)
+        await SpeechRecognition.stop().catch(() => undefined)
+        await SpeechRecognition.removeAllListeners().catch(() => undefined)
+      }
+
       setVoiceEnabled(false)
       return
     }
@@ -485,6 +630,13 @@ export function useKitchenApp() {
 
     if (recognitionMode === 'native') {
       try {
+        const availability = await SpeechRecognition.available()
+        if (!availability.available) {
+          setRecognitionSupported(false)
+          setNotice('当前手机没有可用的系统语音识别服务，请先启用系统语音助手或语音输入。')
+          return
+        }
+
         const permissions = await SpeechRecognition.checkPermissions()
         const currentPermission = permissions.speechRecognition
 
@@ -499,6 +651,10 @@ export function useKitchenApp() {
         setNotice('请求麦克风权限失败，请到系统设置里检查应用权限。')
         return
       }
+
+      setNotice(null)
+      setVoiceEnabled(true)
+      return
     }
 
     setNotice(null)
@@ -520,6 +676,26 @@ export function useKitchenApp() {
       setTimerLeft(selectedRecipe.steps[0].durationMinutes * 60)
       setIsTimerRunning(false)
       setMessages([createMessage('assistant', getWelcomeMessage(selectedRecipe))])
+      setAssistantInput('')
+      setNotice(null)
+    })
+  }
+
+  const resumeCooking = (recipeId: string, stepIndex: number) => {
+    const recipe = recipesData.find((item) => item.id === recipeId)
+    if (!recipe) {
+      return
+    }
+
+    const safeIndex = Math.max(0, Math.min(stepIndex, recipe.steps.length - 1))
+
+    startTransition(() => {
+      setSelectedRecipeId(recipeId)
+      setScreen('cook')
+      setCurrentStepIndex(safeIndex)
+      setTimerLeft(recipe.steps[safeIndex].durationMinutes * 60)
+      setIsTimerRunning(false)
+      setMessages([createMessage('assistant', getWelcomeMessage(recipe))])
       setAssistantInput('')
       setNotice(null)
     })
@@ -562,36 +738,9 @@ export function useKitchenApp() {
     setNotice(null)
   }
 
-  const importRecipe = async () => {
-    const safeUrl = importUrl.trim()
-    if (!safeUrl) {
-      setNotice('请先粘贴攻略文章或视频链接。')
-      return
-    }
-
-    setIsImportingRecipe(true)
-    setNotice(null)
-
-    try {
-      const result = await importRecipeFromLink(safeUrl)
-      setImportUrl('')
-      setSelectedRecipeId(result.recipe.id)
-      setReloadNonce((previous) => previous + 1)
-      setNotice(`已从链接生成菜谱：${result.recipe.title}`)
-    } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : '链接导入失败，请稍后再试。',
-      )
-    } finally {
-      setIsImportingRecipe(false)
-    }
-  }
-
   const voiceStatus: VoiceStatus = !recognitionSupported
     ? 'unsupported'
-    : voiceEnabled && screen === 'cook'
+    : (voiceEnabled || isNativeVoiceListening) && screen === 'cook'
       ? 'listening'
       : 'idle'
 
@@ -606,7 +755,6 @@ export function useKitchenApp() {
     recipesData,
     recommendations,
     searchQuery,
-    importUrl,
     difficulty,
     timeLimit,
     currentStepIndex,
@@ -624,7 +772,6 @@ export function useKitchenApp() {
     recipesError,
     notice,
     isAssistantLoading,
-    isImportingRecipe,
     isFinishing,
     quickPrompts,
     currentRecipeCompletions,
@@ -633,7 +780,6 @@ export function useKitchenApp() {
     setScreen,
     setSelectedRecipeId,
     setSearchQuery,
-    setImportUrl,
     setDifficulty,
     setTimeLimit,
     setAssistantInput,
@@ -645,9 +791,10 @@ export function useKitchenApp() {
     setNotice,
     jumpToStep,
     startCooking,
+    resumeCooking,
     finishCooking,
     retryLoading,
-    importRecipe,
+    setReloadNonce,
     submitAssistantQuestion,
   }
 }

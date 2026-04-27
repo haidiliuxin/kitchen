@@ -6,11 +6,9 @@ type DiscoverScreenProps = {
   selectedRecipe: Recipe | null
   recipesData: Recipe[]
   searchQuery: string
-  importUrl: string
   difficulty: '全部' | Difficulty
   timeLimit: TimeLimit
   isRecipesLoading: boolean
-  isImportingRecipe: boolean
   isHistoryLoading: boolean
   recipesError: string | null
   historyCount: number
@@ -19,8 +17,6 @@ type DiscoverScreenProps = {
   onRetry: () => void
   onSelectRecipe: (recipeId: string) => void
   onSearchQueryChange: (value: string) => void
-  onImportUrlChange: (value: string) => void
-  onImportRecipe: () => void
   onDifficultyChange: (value: '全部' | Difficulty) => void
   onTimeLimitChange: (value: TimeLimit) => void
 }
@@ -29,11 +25,9 @@ export function DiscoverScreen({
   selectedRecipe,
   recipesData,
   searchQuery,
-  importUrl,
   difficulty,
   timeLimit,
   isRecipesLoading,
-  isImportingRecipe,
   isHistoryLoading,
   recipesError,
   historyCount,
@@ -42,8 +36,6 @@ export function DiscoverScreen({
   onRetry,
   onSelectRecipe,
   onSearchQueryChange,
-  onImportUrlChange,
-  onImportRecipe,
   onDifficultyChange,
   onTimeLimitChange,
 }: DiscoverScreenProps) {
@@ -91,29 +83,6 @@ export function DiscoverScreen({
           </article>
         </div>
       </header>
-
-      <section className="panel import-panel">
-        <div className="section-heading">
-          <div>
-            <span className="section-kicker">链接生成菜谱</span>
-            <h2>从攻略文章或视频导入</h2>
-          </div>
-          <p>粘贴一个做饭攻略链接，系统会抓取内容并用大模型整理成可跟做步骤。</p>
-        </div>
-        <div className="import-bar">
-          <label className="search-field import-field">
-            <span>攻略链接</span>
-            <input
-              value={importUrl}
-              onChange={(event) => onImportUrlChange(event.target.value)}
-              placeholder="例如：https://example.com/tomato-egg-guide"
-            />
-          </label>
-          <button className="primary-button import-button" onClick={onImportRecipe} disabled={isImportingRecipe}>
-            {isImportingRecipe ? '正在解析并生成菜谱...' : '一键导入为菜谱'}
-          </button>
-        </div>
-      </section>
 
       <main className="discover-layout" id="recipe-library">
         <section className="panel library-panel">

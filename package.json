@@ -16,6 +16,7 @@
     "android:copy": "npx cap copy android",
     "whisper:setup": "powershell -ExecutionPolicy Bypass -File tools/whisper-service/setup.ps1",
     "whisper:start": "powershell -ExecutionPolicy Bypass -File tools/whisper-service/start.ps1",
+    "tunnel:start": "powershell -ExecutionPolicy Bypass -File tools/cloudflared-tunnel/start.ps1",
     "lint": "eslint .",
     "preview": "vite preview",
     "start": "node server-dist/server/index.js"
@@ -24,6 +25,7 @@
     "@capacitor-community/speech-recognition": "^7.0.1",
     "@capacitor-community/text-to-speech": "^8.0.0",
     "@capacitor/android": "^8.3.0",
+    "@capacitor/app": "^8.1.0",
     "@capacitor/cli": "^8.3.0",
     "@capacitor/core": "^8.3.0",
     "dotenv": "^17.3.1",

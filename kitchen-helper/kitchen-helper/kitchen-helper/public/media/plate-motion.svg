@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 270" role="img" aria-labelledby="title desc">
+  <title id="title">装盘离线动作演示</title>
+  <desc id="desc">菜品盛入盘中并点缀的循环动画。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fff7ed"/>
+      <stop offset="100%" stop-color="#fde68a"/>
+    </linearGradient>
+  </defs>
+  <rect width="480" height="270" rx="28" fill="url(#bg)"/>
+  <ellipse cx="240" cy="164" rx="112" ry="46" fill="#f8fafc"/>
+  <ellipse cx="240" cy="164" rx="88" ry="28" fill="#fff"/>
+  <path d="M182 156 C202 136 278 136 298 156 C314 172 296 192 240 194 C184 192 166 172 182 156Z" fill="#f97316">
+    <animate attributeName="transform" type="translate" values="0 10;0 0;0 10" dur="3s" repeatCount="indefinite"/>
+  </path>
+  <circle cx="210" cy="154" r="7" fill="#22c55e">
+    <animate attributeName="cy" values="154;148;154" dur="3s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="270" cy="160" r="7" fill="#22c55e">
+    <animate attributeName="cy" values="160;152;160" dur="3s" repeatCount="indefinite"/>
+  </circle>
+  <path d="M336 102 C356 114 364 128 362 148" fill="none" stroke="#d1d5db" stroke-width="18" stroke-linecap="round"/>
+  <path d="M352 126 C362 120 376 120 388 130" fill="none" stroke="#d1d5db" stroke-width="12" stroke-linecap="round">
+    <animateTransform attributeName="transform" type="translate" values="0 0;-8 8;0 0" dur="3s" repeatCount="indefinite"/>
+  </path>
+  <g fill="#fff" font-family="Arial, sans-serif">
+    <text x="34" y="42" font-size="18" opacity="0.72">离线动作短片</text>
+    <text x="34" y="68" font-size="28" font-weight="700" fill="#7c2d12">趁热装盘收尾</text>
+    <text x="34" y="234" font-size="18" fill="#7c2d12">确认颜色亮、锅里还有薄汁时就可以出锅</text>
+  </g>
+</svg>

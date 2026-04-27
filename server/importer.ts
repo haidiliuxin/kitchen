@@ -20,6 +20,7 @@ const bundledYtDlpBinaryPath =
 
 type FetchableSource = {
   url: string
+  mediaUrl?: string
   title: string
   description: string
   content: string
@@ -53,12 +54,29 @@ type CaptionTrack = {
   url?: string
 }
 
+type YtDlpFormat = {
+  url?: string
+  ext?: string
+  protocol?: string
+  vcodec?: string
+  acodec?: string
+  height?: number
+  width?: number
+  filesize?: number
+  filesize_approx?: number
+}
+
 type YtDlpVideoInfo = {
   title?: string
   fulltitle?: string
   description?: string
   webpage_url?: string
   extractor_key?: string
+  url?: string
+  ext?: string
+  protocol?: string
+  requested_downloads?: YtDlpFormat[]
+  formats?: YtDlpFormat[]
   subtitles?: Record<string, CaptionTrack[]>
   automatic_captions?: Record<string, CaptionTrack[]>
   chapters?: Array<{
@@ -457,6 +475,58 @@ async function getYtDlpWrap(): Promise<any | null> {
 async function executeYtDlpJson(ytDlp: any, args: string[]): Promise<YtDlpVideoInfo> {
   const raw = await ytDlp.execPromise(args)
   return JSON.parse(raw) as YtDlpVideoInfo
+}
+
+function isPlayableYtDlpUrl(format?: YtDlpFormat | YtDlpVideoInfo): boolean {
+  if (!format) {
+    return false
+  }
+
+  const url = format?.url?.trim()
+  if (!url) {
+    return false
+  }
+
+  const protocol = format.protocol?.toLowerCase() ?? ''
+  if (protocol && !/(https?|m3u8|http_dash_segments)/.test(protocol)) {
+    return false
+  }
+
+  return /^https?:\/\//i.test(url)
+}
+
+function pickYtDlpMediaUrl(info: YtDlpVideoInfo): string | undefined {
+  const requestedDownload = info.requested_downloads?.find((format) => isPlayableYtDlpUrl(format))
+  if (requestedDownload?.url) {
+    return requestedDownload.url
+  }
+
+  if (isPlayableYtDlpUrl(info)) {
+    return info.url
+  }
+
+  const playableFormats: YtDlpFormat[] = (info.formats ?? [])
+    .filter((format): format is YtDlpFormat => isPlayableYtDlpUrl(format))
+    .filter((format: YtDlpFormat) => {
+      const vcodec = format.vcodec?.toLowerCase() ?? ''
+      return vcodec !== 'none'
+    })
+    .sort((left: YtDlpFormat, right: YtDlpFormat) => {
+      const leftAudioScore = left.acodec && left.acodec !== 'none' ? 1 : 0
+      const rightAudioScore = right.acodec && right.acodec !== 'none' ? 1 : 0
+      const leftExtScore = left.ext === 'mp4' ? 1 : 0
+      const rightExtScore = right.ext === 'mp4' ? 1 : 0
+      const leftHeight = left.height ?? 0
+      const rightHeight = right.height ?? 0
+
+      return (
+        rightAudioScore - leftAudioScore ||
+        rightExtScore - leftExtScore ||
+        Math.min(rightHeight, 1080) - Math.min(leftHeight, 1080)
+      )
+    })
+
+  return playableFormats[0]?.url
 }
 
 async function getYoutubeTranscriptFetcher(): Promise<
@@ -933,6 +1003,7 @@ async function fetchVideoTranscript(
   transcript: string
   transcriptLanguage?: string
   extractionNotes: string[]
+  mediaUrl?: string
   metadataTitle?: string
   metadataDescription?: string
   metadataContent?: string
@@ -975,6 +1046,7 @@ async function fetchVideoTranscript(
           return {
             transcript: payload.transcript.trim().slice(0, 16000),
             transcriptLanguage: payload.language,
+            mediaUrl: renderedExtraction?.mediaUrl,
             extractionNotes:
               Array.isArray(payload.notes) && payload.notes.length > 0
                 ? payload.notes
@@ -1014,6 +1086,7 @@ async function fetchVideoTranscript(
         ...pickBestCaptionTracks(info.subtitles),
         ...pickBestCaptionTracks(info.automatic_captions),
       ]
+      const mediaUrl = renderedExtraction?.mediaUrl || pickYtDlpMediaUrl(info)
 
       let transcript = ''
       let transcriptLanguage: string | undefined
@@ -1049,9 +1122,16 @@ async function fetchVideoTranscript(
       return {
         transcript,
         transcriptLanguage,
+        mediaUrl,
         extractionNotes: transcript
-          ? [`已通过 yt-dlp 从${provider ?? '视频站点'}提取字幕或自动字幕。`]
-          : [`已通过 yt-dlp 提取视频元信息，但没有拿到可用字幕或字幕内容已被判定为噪音。`],
+          ? [
+              `已通过 yt-dlp 从${provider ?? '视频站点'}提取字幕或自动字幕。`,
+              mediaUrl ? '已提取可供手机端播放的真实视频地址。' : '',
+            ].filter(Boolean)
+          : [
+              `已通过 yt-dlp 提取视频元信息，但没有拿到可用字幕或字幕内容已被判定为噪音。`,
+              mediaUrl ? '已提取可供手机端播放的真实视频地址。' : '',
+            ].filter(Boolean),
         metadataTitle: info.title ?? info.fulltitle,
         metadataDescription: info.description?.slice(0, 500),
         metadataContent,
@@ -1145,11 +1225,12 @@ async function fetchSourceFromUrl(url: string): Promise<FetchableSource> {
     }
 
     const html = await response.text()
-    const sourceType = detectSourceType(parsedUrl.toString(), html)
-    const provider = detectVideoProvider(parsedUrl.toString()) ?? undefined
-    const renderedExtraction = await extractRenderedVideoPage(parsedUrl.toString(), provider)
+    const finalFetchedUrl = response.url || parsedUrl.toString()
+    const sourceType = detectSourceType(finalFetchedUrl, html)
+    const provider = detectVideoProvider(finalFetchedUrl) ?? undefined
+    const renderedExtraction = await extractRenderedVideoPage(finalFetchedUrl, provider)
     const transcriptResult = await fetchVideoTranscript(
-      renderedExtraction?.finalUrl || parsedUrl.toString(),
+      renderedExtraction?.finalUrl || finalFetchedUrl,
       sourceType,
       renderedExtraction,
     )
@@ -1184,6 +1265,7 @@ async function fetchSourceFromUrl(url: string): Promise<FetchableSource> {
       title ? '页面标题' : '',
       description ? '页面简介' : '',
       content ? '网页正文/元信息' : '',
+      renderedExtraction?.mediaUrl || transcriptResult.mediaUrl ? '视频直链' : '',
       transcriptResult.transcript ? '视频字幕/自动字幕' : '',
     ].filter(Boolean)
 
@@ -1192,7 +1274,8 @@ async function fetchSourceFromUrl(url: string): Promise<FetchableSource> {
     }
 
     return {
-      url: renderedExtraction?.finalUrl || parsedUrl.toString(),
+      url: renderedExtraction?.finalUrl || finalFetchedUrl,
+      mediaUrl: renderedExtraction?.mediaUrl || transcriptResult.mediaUrl,
       title,
       description,
       content,
@@ -1228,7 +1311,8 @@ function buildImportSystemPrompt(): string {
     '字段必须完整，结构必须符合要求。',
     'demoFrames 必须恰好 3 条短句。',
     'difficulty 只能是：零失败、轻松进阶、周末进阶。',
-    'video.url 可以直接填原始链接，posterUrl 可以省略。',
+    'video.url 优先填“可播放视频地址”；如果没有可播放地址，再填原始链接，posterUrl 可以省略。',
+    '只有在字幕时间戳、章节或页面明确给出时间范围时，才填写 video.startSeconds 和 video.endSeconds；不要按步骤时长平均估算视频片段。',
     '如果提供了视频字幕，请优先结合字幕来拆分真实步骤。',
     '如果字幕、章节和网页简介冲突，优先采信更具体、更像操作指令的内容。',
     '如果给了“结构化证据”，请优先采用结构化证据中的食材、步骤、状态和风险点，不要退化成过于笼统的模板。',
@@ -1287,6 +1371,7 @@ function buildEvidenceUserPrompt(source: FetchableSource): string {
     `原始链接：${source.url}`,
     `来源类型：${source.sourceType}`,
     `站点：${source.provider ?? '未知'}`,
+    `可播放视频地址：${source.mediaUrl || '无'}`,
     `已提取信号：${source.mediaSignals.join('、') || '无'}`,
     `标题：${source.title}`,
     `简介：${source.description || '无'}`,
@@ -1347,7 +1432,7 @@ function buildImportUserPrompt(source: FetchableSource): string {
             demoFrames: ['动作提示 1', '动作提示 2', '动作提示 3'],
             voiceover: '适合朗读给用户听的短引导',
             video: {
-              url: source.url,
+              url: getPlayableSourceUrl(source),
               caption: '原始攻略链接',
               creditLabel: source.sourceType === 'video' ? '视频来源' : '文章来源',
               creditUrl: source.url,
@@ -1366,6 +1451,7 @@ function buildImportUserPrompt(source: FetchableSource): string {
     `原始链接：${source.url}`,
     `来源类型：${source.sourceType}`,
     `站点：${source.provider ?? '未知'}`,
+    `可播放视频地址：${source.mediaUrl || '无'}`,
     `已提取信号：${source.mediaSignals.join('、') || '无'}`,
     `标题：${source.title}`,
     `简介：${source.description || '无'}`,
@@ -1574,12 +1660,44 @@ function normalizeStringArray(value: unknown, fallback: string[]): string[] {
   return next.length > 0 ? next : fallback
 }
 
-function normalizeStep(step: unknown, index: number, sourceUrl: string): Step {
+function getPlayableSourceUrl(source: FetchableSource): string {
+  return source.mediaUrl?.trim() || source.url
+}
+
+function buildSourceStepVideo(
+  source: FetchableSource,
+  caption = '原始攻略链接',
+  segment?: { startSeconds: number; endSeconds: number },
+): NonNullable<Step['video']> {
+  return {
+    url: getPlayableSourceUrl(source),
+    caption,
+    creditLabel: source.sourceType === 'video' ? '视频来源' : '文章来源',
+    creditUrl: source.url,
+    startSeconds: segment?.startSeconds,
+    endSeconds: segment?.endSeconds,
+  }
+}
+
+function normalizeStep(step: unknown, index: number, source: FetchableSource): Step {
   const raw = typeof step === 'object' && step !== null ? (step as Record<string, unknown>) : {}
   const videoRecord =
     typeof raw.video === 'object' && raw.video !== null
       ? (raw.video as Record<string, unknown>)
       : null
+  const fallbackVideo = buildSourceStepVideo(source)
+  const rawVideoUrl =
+    videoRecord && typeof videoRecord.url === 'string' && videoRecord.url.trim()
+      ? videoRecord.url.trim()
+      : ''
+  const rawStartSeconds =
+    videoRecord && typeof videoRecord.startSeconds === 'number' && Number.isFinite(videoRecord.startSeconds)
+      ? Math.max(0, videoRecord.startSeconds)
+      : undefined
+  const rawEndSeconds =
+    videoRecord && typeof videoRecord.endSeconds === 'number' && Number.isFinite(videoRecord.endSeconds)
+      ? Math.max(0, videoRecord.endSeconds)
+      : undefined
   const demoFrames = normalizeStringArray(raw.demoFrames, ['准备动作', '关键动作', '收尾动作']).slice(0, 3)
 
   while (demoFrames.length < 3) {
@@ -1620,9 +1738,9 @@ function normalizeStep(step: unknown, index: number, sourceUrl: string): Step {
     video: videoRecord
       ? {
           url:
-            typeof videoRecord.url === 'string' && videoRecord.url.trim()
-              ? videoRecord.url.trim()
-              : sourceUrl,
+            rawVideoUrl && !(source.mediaUrl && rawVideoUrl === source.url)
+              ? rawVideoUrl
+              : fallbackVideo.url,
           posterUrl:
             typeof videoRecord.posterUrl === 'string' && videoRecord.posterUrl.trim()
               ? videoRecord.posterUrl.trim()
@@ -1630,21 +1748,25 @@ function normalizeStep(step: unknown, index: number, sourceUrl: string): Step {
           caption:
             typeof videoRecord.caption === 'string' && videoRecord.caption.trim()
               ? videoRecord.caption.trim()
-              : '原始攻略链接',
+              : fallbackVideo.caption,
           creditLabel:
             typeof videoRecord.creditLabel === 'string' && videoRecord.creditLabel.trim()
               ? videoRecord.creditLabel.trim()
-              : undefined,
+              : fallbackVideo.creditLabel,
           creditUrl:
             typeof videoRecord.creditUrl === 'string' && videoRecord.creditUrl.trim()
               ? videoRecord.creditUrl.trim()
-              : undefined,
+              : fallbackVideo.creditUrl,
+          startSeconds:
+            rawStartSeconds !== undefined && rawEndSeconds !== undefined && rawEndSeconds > rawStartSeconds
+              ? rawStartSeconds
+              : fallbackVideo.startSeconds,
+          endSeconds:
+            rawStartSeconds !== undefined && rawEndSeconds !== undefined && rawEndSeconds > rawStartSeconds
+              ? rawEndSeconds
+              : fallbackVideo.endSeconds,
         }
-      : {
-          url: sourceUrl,
-          caption: '原始攻略链接',
-          creditUrl: sourceUrl,
-        },
+      : fallbackVideo,
   }
 }
 
@@ -1686,7 +1808,7 @@ function normalizeImportedRecipe(payload: unknown, source: FetchableSource): Rec
         : Math.max(
             10,
             stepsRaw.reduce(
-              (total, step, index) => total + normalizeStep(step, index, source.url).durationMinutes,
+              (total, step, index) => total + normalizeStep(step, index, source).durationMinutes,
               0,
             ),
           ),
@@ -1761,7 +1883,7 @@ function normalizeImportedRecipe(payload: unknown, source: FetchableSource): Rec
             (item): item is { issue: string; answer: string; keywords: string[] } => item !== null,
           )
       : [],
-    steps: stepsRaw.map((step, index) => normalizeStep(step, index, source.url)),
+    steps: stepsRaw.map((step, index) => normalizeStep(step, index, source)),
     palette:
       typeof raw.palette === 'object' && raw.palette !== null
         ? {
@@ -1911,12 +2033,10 @@ function buildFallbackSteps(source: FetchableSource, evidence?: RecipeEvidence):
         0,
         120,
       ),
-      video: {
-        url: source.url,
-        caption: `原始攻略链接${array.length > 1 ? ` · 第 ${index + 1} 步参考` : ''}`,
-        creditLabel: source.sourceType === 'video' ? '视频来源' : '文章来源',
-        creditUrl: source.url,
-      },
+      video: buildSourceStepVideo(
+        source,
+        `原始攻略链接${array.length > 1 ? ` · 第 ${index + 1} 步参考` : ''}`,
+      ),
     }))
   }
 
@@ -1993,12 +2113,7 @@ function buildFallbackSteps(source: FetchableSource, evidence?: RecipeEvidence):
         (evidenceStep?.sensoryCue || '确认状态差不多了再继续').slice(0, 24),
       ],
       voiceover: `${voice}。如果你拿不准，就对照原视频继续确认这一步。`,
-      video: {
-        url: source.url,
-        caption: '原始攻略链接',
-        creditLabel: source.sourceType === 'video' ? '视频来源' : '文章来源',
-        creditUrl: source.url,
-      },
+      video: buildSourceStepVideo(source, '原始攻略链接'),
     }
   })
 }

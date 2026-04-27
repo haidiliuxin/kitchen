@@ -23,6 +23,8 @@ export type StepVideo = {
   caption: string
   creditLabel?: string
   creditUrl?: string
+  startSeconds?: number
+  endSeconds?: number
 }
 
 export type Step = {
@@ -66,6 +68,23 @@ export type CookingHistoryEntry = {
   id: string
   recipeId: string
   finishedAt: string
+}
+
+export type ImportSourceType = 'video' | 'document'
+
+export type ImportedRecipeSummary = {
+  id: string
+  title: string
+  sourceLabel: string
+  summary: string
+  tags: string[]
+  recipeId: string | null
+}
+
+export type ImportAnalyzeResponse = {
+  status: 'ok' | 'mock'
+  message: string
+  importedRecipes: ImportedRecipeSummary[]
 }
 
 export type RecipeFilters = {

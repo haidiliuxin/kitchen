@@ -197,6 +197,54 @@ app.post('/api/imports/from-link', async (request, response) => {
   }
 })
 
+app.post('/api/imports/analyze', async (request, response) => {
+  const url = request.body?.url
+  const sourceType = request.body?.sourceType
+
+  if (typeof url !== 'string' || !url.trim()) {
+    response.status(400).json({ message: 'url 是必填项。' })
+    return
+  }
+
+  if (sourceType !== 'video' && sourceType !== 'document') {
+    response.status(400).json({ message: 'sourceType 必须是 video 或 document。' })
+    return
+  }
+
+  try {
+    const imported = await importRecipeFromUrl(url.trim())
+    const savedRecipe = saveImportedRecipe(db, imported.recipe)
+
+    response.status(201).json({
+      status: 'ok',
+      message: `已根据${sourceType === 'video' ? '视频' : '文档'}链接生成菜谱：${savedRecipe.title}`,
+      importedRecipes: [
+        {
+          id: savedRecipe.id,
+          title: savedRecipe.title,
+          sourceLabel: sourceType === 'video' ? '视频链接' : '文档链接',
+          summary: savedRecipe.description || savedRecipe.highlight,
+          tags: savedRecipe.tags.slice(0, 4),
+          recipeId: savedRecipe.id,
+        },
+      ],
+      generationMode: imported.generationMode ?? 'deepseek',
+      source: {
+        url: imported.source.url,
+        title: imported.source.title,
+        sourceType: imported.source.sourceType,
+      },
+    })
+  } catch (error) {
+    response.status(500).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : '链接识别失败，请稍后重试。',
+    })
+  }
+})
+
 app.post('/api/assistant/reply', async (request, response) => {
   const recipeId = request.body?.recipeId
   const stepIndex = request.body?.stepIndex
