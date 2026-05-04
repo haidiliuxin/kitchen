@@ -1,9 +1,12 @@
+import { createHash } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { recipes } from '../src/data/recipes.js'
 
-const recipeSeedVersion = '2026-03-31-v2'
+const recipeSeedVersion = createHash('sha256')
+  .update(JSON.stringify(recipes))
+  .digest('hex')
 
 export const databaseFilePath = path.join(process.cwd(), 'data', 'kitchen.sqlite')
 
@@ -181,9 +184,7 @@ function seedRecipes(db: DatabaseSync): void {
   db.exec('BEGIN')
 
   try {
-    db.exec('DELETE FROM recipes')
-
-    const insertRecipe = db.prepare(`
+    const upsertRecipe = db.prepare(`
       INSERT INTO recipes (
         id,
         title,
@@ -198,6 +199,18 @@ function seedRecipes(db: DatabaseSync): void {
         palette_start,
         palette_end
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title,
+        subtitle = excluded.subtitle,
+        scene = excluded.scene,
+        difficulty = excluded.difficulty,
+        duration = excluded.duration,
+        servings = excluded.servings,
+        highlight = excluded.highlight,
+        risk_note = excluded.risk_note,
+        description = excluded.description,
+        palette_start = excluded.palette_start,
+        palette_end = excluded.palette_end
     `)
 
     const insertTag = db.prepare(`
@@ -260,8 +273,20 @@ function seedRecipes(db: DatabaseSync): void {
       ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `)
 
+    const deleteRecipeTags = db.prepare('DELETE FROM recipe_tags WHERE recipe_id = ?')
+    const deleteRecipeSearchTokens = db.prepare('DELETE FROM recipe_search_tokens WHERE recipe_id = ?')
+    const deleteRecipeTools = db.prepare('DELETE FROM recipe_tools WHERE recipe_id = ?')
+    const deleteIngredients = db.prepare('DELETE FROM ingredients WHERE recipe_id = ?')
+    const deleteSubstitutions = db.prepare('DELETE FROM substitutions WHERE recipe_id = ?')
+    const deleteRescueTips = db.prepare('DELETE FROM rescue_tips WHERE recipe_id = ?')
+    const deleteStepCheckpoints = db.prepare('DELETE FROM step_checkpoints WHERE recipe_id = ?')
+    const deleteStepMistakes = db.prepare('DELETE FROM step_common_mistakes WHERE recipe_id = ?')
+    const deleteStepDemoFrames = db.prepare('DELETE FROM step_demo_frames WHERE recipe_id = ?')
+    const deleteStepVideos = db.prepare('DELETE FROM step_videos WHERE recipe_id = ?')
+    const deleteSteps = db.prepare('DELETE FROM steps WHERE recipe_id = ?')
+
     for (const recipe of recipes) {
-      insertRecipe.run(
+      upsertRecipe.run(
         recipe.id,
         recipe.title,
         recipe.subtitle,
@@ -275,6 +300,17 @@ function seedRecipes(db: DatabaseSync): void {
         recipe.palette.start,
         recipe.palette.end,
       )
+      deleteRecipeTags.run(recipe.id)
+      deleteRecipeSearchTokens.run(recipe.id)
+      deleteRecipeTools.run(recipe.id)
+      deleteIngredients.run(recipe.id)
+      deleteSubstitutions.run(recipe.id)
+      deleteRescueTips.run(recipe.id)
+      deleteStepCheckpoints.run(recipe.id)
+      deleteStepMistakes.run(recipe.id)
+      deleteStepDemoFrames.run(recipe.id)
+      deleteStepVideos.run(recipe.id)
+      deleteSteps.run(recipe.id)
 
       recipe.tags.forEach((tag, index) => {
         insertTag.run(recipe.id, index, tag)

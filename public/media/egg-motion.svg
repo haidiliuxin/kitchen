@@ -21,7 +21,6 @@
       values="M138 82 C160 78 176 84 186 96; M136 76 C166 72 188 82 204 104; M138 82 C160 78 176 84 186 96"/>
   </path>
   <g fill="#fff" font-family="Arial, sans-serif">
-    <text x="34" y="42" font-size="18" opacity="0.72">离线动作短片</text>
     <text x="34" y="68" font-size="28" font-weight="700" fill="#7c2d12">蛋液下锅先定型</text>
     <text x="34" y="234" font-size="18" fill="#7c2d12">边缘微微凝固时再轻轻推散</text>
   </g>

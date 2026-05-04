@@ -501,6 +501,26 @@ export function useKitchenApp() {
     })
   }
 
+  const resumeCooking = (recipeId: string, stepIndex: number) => {
+    const recipe = recipesData.find((item) => item.id === recipeId)
+    if (!recipe) {
+      return
+    }
+
+    const safeIndex = Math.max(0, Math.min(stepIndex, recipe.steps.length - 1))
+
+    startTransition(() => {
+      setSelectedRecipeId(recipeId)
+      setScreen('cook')
+      setCurrentStepIndex(safeIndex)
+      setTimerLeft(recipe.steps[safeIndex].durationMinutes * 60)
+      setIsTimerRunning(false)
+      setMessages([createMessage('assistant', getWelcomeMessage(recipe))])
+      setAssistantInput('')
+      setNotice(null)
+    })
+  }
+
   const finishCooking = async () => {
     if (!selectedRecipe || isFinishing) {
       return
@@ -590,6 +610,7 @@ export function useKitchenApp() {
     setNotice,
     jumpToStep,
     startCooking,
+    resumeCooking,
     finishCooking,
     retryLoading,
     submitAssistantQuestion,

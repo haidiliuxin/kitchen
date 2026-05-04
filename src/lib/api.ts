@@ -1,4 +1,10 @@
-import type { CookingHistoryEntry, Recipe, RecipeFilters } from '../types.js'
+import type {
+  CookingHistoryEntry,
+  ImportAnalyzeResponse,
+  ImportSourceType,
+  Recipe,
+  RecipeFilters,
+} from '../types.js'
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').trim()
 
@@ -87,4 +93,17 @@ export async function askAssistant(
   })
 
   return payload.answer
+}
+
+export async function analyzeImportLink(
+  sourceType: ImportSourceType,
+  url: string,
+): Promise<ImportAnalyzeResponse> {
+  return requestJson<ImportAnalyzeResponse>('/api/imports/analyze', {
+    method: 'POST',
+    body: JSON.stringify({
+      sourceType,
+      url,
+    }),
+  })
 }

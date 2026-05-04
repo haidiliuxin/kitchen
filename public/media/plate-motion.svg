@@ -24,7 +24,6 @@
     <animateTransform attributeName="transform" type="translate" values="0 0;-8 8;0 0" dur="3s" repeatCount="indefinite"/>
   </path>
   <g fill="#fff" font-family="Arial, sans-serif">
-    <text x="34" y="42" font-size="18" opacity="0.72">离线动作短片</text>
     <text x="34" y="68" font-size="28" font-weight="700" fill="#7c2d12">趁热装盘收尾</text>
     <text x="34" y="234" font-size="18" fill="#7c2d12">确认颜色亮、锅里还有薄汁时就可以出锅</text>
   </g>

@@ -68,6 +68,23 @@ export type CookingHistoryEntry = {
   finishedAt: string
 }
 
+export type ImportSourceType = 'video' | 'document'
+
+export type ImportedRecipeSummary = {
+  id: string
+  title: string
+  sourceLabel: string
+  summary: string
+  tags: string[]
+  recipeId: string | null
+}
+
+export type ImportAnalyzeResponse = {
+  status: 'ok' | 'mock'
+  message: string
+  importedRecipes: ImportedRecipeSummary[]
+}
+
 export type RecipeFilters = {
   query?: string
   difficulty?: '全部' | Difficulty

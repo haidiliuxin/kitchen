@@ -83,6 +83,54 @@ app.get('/api/history', (_request, response) => {
   response.json(getCookingHistory(db))
 })
 
+app.post('/api/imports/analyze', (request, response) => {
+  const sourceType = request.body?.sourceType
+  const url = request.body?.url
+
+  if ((sourceType !== 'video' && sourceType !== 'document') || typeof url !== 'string' || !url.trim()) {
+    response.status(400).json({
+      message: 'sourceType 和 url 是必填项，且 sourceType 必须是 video 或 document。',
+    })
+    return
+  }
+
+  let parsedUrl: URL
+  try {
+    parsedUrl = new URL(url)
+  } catch {
+    response.status(400).json({
+      message: '链接格式不正确，请粘贴完整的 http 或 https 地址。',
+    })
+    return
+  }
+
+  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+    response.status(400).json({
+      message: '暂时只支持 http 或 https 链接。',
+    })
+    return
+  }
+
+  const recipes = listRecipes(db, {}).slice(0, 2)
+  const importedRecipes = recipes.map((recipe, index) => ({
+    id: `${sourceType}-generated-${index + 1}`,
+    title: recipe.title,
+    sourceLabel: sourceType === 'video' ? '视频链接识别结果' : '文档链接识别结果',
+    summary:
+      sourceType === 'video'
+        ? `已从视频内容中提取出 ${recipe.title} 的食材、步骤和火候提示。`
+        : `已从文档内容中整理出 ${recipe.title} 的做法重点，适合继续补全成标准菜谱。`,
+    tags: [recipe.difficulty, `${recipe.duration} 分钟`, recipe.scene],
+    recipeId: recipe.id,
+  }))
+
+  response.json({
+    status: 'mock',
+    message: '导入识别接口占位已生效，后端可以在这里替换成真实解析逻辑。',
+    importedRecipes,
+  })
+})
+
 app.post('/api/history', (request, response) => {
   const recipeId = request.body?.recipeId
 
