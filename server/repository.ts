@@ -1,6 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import type { CookingHistoryEntry, Recipe, RecipeFilters } from '../src/types.js'
+import type {
+  CookingHistoryEntry,
+  MissingIngredient,
+  PrepIngredient,
+  PrepPlan,
+  Recipe,
+  RecipeFilters,
+  RecipeSourceType,
+  RecipeVisibility,
+} from '../src/types.js'
 
 type RecipeRow = {
   id: string
@@ -15,6 +24,9 @@ type RecipeRow = {
   description: string
   palette_start: string
   palette_end: string
+  visibility: RecipeVisibility
+  source_type: RecipeSourceType
+  owner_user_id: string | null
 }
 
 type StepRow = {
@@ -195,6 +207,9 @@ function assembleRecipe(db: DatabaseSync, row: RecipeRow): Recipe {
       start: row.palette_start,
       end: row.palette_end,
     },
+    visibility: row.visibility,
+    sourceType: row.source_type,
+    ownerUserId: row.owner_user_id,
   }
 }
 
@@ -232,7 +247,18 @@ function matchesFilters(recipe: Recipe, filters: RecipeFilters): boolean {
   return haystack.includes(query)
 }
 
-export function listRecipes(db: DatabaseSync, filters: RecipeFilters = {}): Recipe[] {
+function userVisibilityWhereClause(): string {
+  return `
+    WHERE visibility IN ('official', 'public')
+       OR (? IS NOT NULL AND owner_user_id = ?)
+  `
+}
+
+export function listRecipes(
+  db: DatabaseSync,
+  filters: RecipeFilters = {},
+  userId?: string | null,
+): Recipe[] {
   const rows = db
     .prepare(`
       SELECT
@@ -247,16 +273,24 @@ export function listRecipes(db: DatabaseSync, filters: RecipeFilters = {}): Reci
         risk_note,
         description,
         palette_start,
-        palette_end
+        palette_end,
+        visibility,
+        source_type,
+        owner_user_id
       FROM recipes
+      ${userVisibilityWhereClause()}
       ORDER BY duration ASC, title ASC
     `)
-    .all() as RecipeRow[]
+    .all(userId ?? null, userId ?? null) as RecipeRow[]
 
   return rows.map((row) => assembleRecipe(db, row)).filter((recipe) => matchesFilters(recipe, filters))
 }
 
-export function getRecipeById(db: DatabaseSync, recipeId: string): Recipe | null {
+export function getRecipeById(
+  db: DatabaseSync,
+  recipeId: string,
+  userId?: string | null,
+): Recipe | null {
   const row = db
     .prepare(`
       SELECT
@@ -271,11 +305,18 @@ export function getRecipeById(db: DatabaseSync, recipeId: string): Recipe | null
         risk_note,
         description,
         palette_start,
-        palette_end
+        palette_end,
+        visibility,
+        source_type,
+        owner_user_id
       FROM recipes
       WHERE id = ?
+        AND (
+          visibility IN ('official', 'public')
+          OR (? IS NOT NULL AND owner_user_id = ?)
+        )
     `)
-    .get(recipeId) as RecipeRow | undefined
+    .get(recipeId, userId ?? null, userId ?? null) as RecipeRow | undefined
 
   if (!row) {
     return null
@@ -284,14 +325,25 @@ export function getRecipeById(db: DatabaseSync, recipeId: string): Recipe | null
   return assembleRecipe(db, row)
 }
 
-export function getCookingHistory(db: DatabaseSync): CookingHistoryEntry[] {
+export function getCookingHistory(db: DatabaseSync, userId?: string | null): CookingHistoryEntry[] {
   const rows = db
     .prepare(`
-      SELECT id, recipe_id, finished_at
-      FROM cooking_history
+      SELECT h.id, h.recipe_id, h.finished_at
+      FROM cooking_history h
+      JOIN recipes r ON r.id = h.recipe_id
+      WHERE (? IS NULL OR h.user_id IS NULL OR h.user_id = ?)
+        AND (
+          r.visibility IN ('official', 'public')
+          OR (? IS NOT NULL AND r.owner_user_id = ?)
+        )
       ORDER BY finished_at DESC
     `)
-    .all() as Array<{ id: string; recipe_id: string; finished_at: string }>
+    .all(
+      userId ?? null,
+      userId ?? null,
+      userId ?? null,
+      userId ?? null,
+    ) as Array<{ id: string; recipe_id: string; finished_at: string }>
 
   return rows.map((row) => ({
     id: row.id,
@@ -303,6 +355,7 @@ export function getCookingHistory(db: DatabaseSync): CookingHistoryEntry[] {
 export function recordCookingCompletion(
   db: DatabaseSync,
   recipeId: string,
+  userId?: string | null,
 ): CookingHistoryEntry {
   const entry: CookingHistoryEntry = {
     id: randomUUID(),
@@ -311,9 +364,9 @@ export function recordCookingCompletion(
   }
 
   db.prepare(`
-    INSERT INTO cooking_history (id, recipe_id, finished_at)
-    VALUES (?, ?, ?)
-  `).run(entry.id, entry.recipeId, entry.finishedAt)
+    INSERT INTO cooking_history (id, recipe_id, user_id, finished_at)
+    VALUES (?, ?, ?, ?)
+  `).run(entry.id, entry.recipeId, userId ?? null, entry.finishedAt)
 
   return entry
 }
@@ -321,6 +374,7 @@ export function recordCookingCompletion(
 export function getRecommendations(
   db: DatabaseSync,
   excludeRecipeId: string | undefined,
+  userId?: string | null,
   limit = 3,
 ): Recipe[] {
   const rows = db
@@ -331,20 +385,36 @@ export function getRecommendations(
       FROM recipes r
       LEFT JOIN cooking_history h ON h.recipe_id = r.id
       WHERE (? IS NULL OR r.id <> ?)
+        AND (
+          r.visibility IN ('official', 'public')
+          OR (? IS NOT NULL AND r.owner_user_id = ?)
+        )
       GROUP BY r.id
       ORDER BY completion_count ASC, r.duration ASC, r.title ASC
       LIMIT ?
     `)
-    .all(excludeRecipeId ?? null, excludeRecipeId ?? null, limit) as Array<{
+    .all(
+      excludeRecipeId ?? null,
+      excludeRecipeId ?? null,
+      userId ?? null,
+      userId ?? null,
+      limit,
+    ) as Array<{
       id: string
     }>
 
   return rows
-    .map((row) => getRecipeById(db, row.id))
+    .map((row) => getRecipeById(db, row.id, userId))
     .filter((recipe): recipe is Recipe => recipe !== null)
 }
 
-export function saveImportedRecipe(db: DatabaseSync, recipe: Recipe): Recipe {
+export function saveImportedRecipe(
+  db: DatabaseSync,
+  recipe: Recipe,
+  ownerUserId?: string | null,
+  visibility: RecipeVisibility = 'private',
+  sourceType: RecipeSourceType = 'imported',
+): Recipe {
   db.exec('BEGIN')
 
   try {
@@ -361,8 +431,11 @@ export function saveImportedRecipe(db: DatabaseSync, recipe: Recipe): Recipe {
         risk_note,
         description,
         palette_start,
-        palette_end
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        palette_end,
+        visibility,
+        source_type,
+        owner_user_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       recipe.id,
       recipe.title,
@@ -376,6 +449,9 @@ export function saveImportedRecipe(db: DatabaseSync, recipe: Recipe): Recipe {
       recipe.description,
       recipe.palette.start,
       recipe.palette.end,
+      visibility,
+      sourceType,
+      ownerUserId ?? null,
     )
 
     const insertTag = db.prepare(`
@@ -514,9 +590,182 @@ export function saveImportedRecipe(db: DatabaseSync, recipe: Recipe): Recipe {
     })
 
     db.exec('COMMIT')
-    return recipe
+    return {
+      ...recipe,
+      visibility,
+      sourceType,
+      ownerUserId: ownerUserId ?? null,
+    }
   } catch (error) {
     db.exec('ROLLBACK')
     throw error
+  }
+}
+
+export function saveUserRecipe(
+  db: DatabaseSync,
+  recipe: Recipe,
+  ownerUserId: string,
+  visibility: RecipeVisibility = 'private',
+): Recipe {
+  return saveImportedRecipe(db, recipe, ownerUserId, visibility, 'user')
+}
+
+export function updateRecipeVisibility(
+  db: DatabaseSync,
+  recipeId: string,
+  ownerUserId: string,
+  visibility: Extract<RecipeVisibility, 'public' | 'private'>,
+): Recipe | null {
+  const row = db
+    .prepare(`
+      SELECT id
+      FROM recipes
+      WHERE id = ?
+        AND owner_user_id = ?
+        AND source_type IN ('imported', 'user')
+    `)
+    .get(recipeId, ownerUserId) as { id: string } | undefined
+
+  if (!row) {
+    return null
+  }
+
+  db.prepare(`
+    UPDATE recipes
+    SET visibility = ?
+    WHERE id = ?
+      AND owner_user_id = ?
+  `).run(visibility, recipeId, ownerUserId)
+
+  return getRecipeById(db, recipeId, ownerUserId)
+}
+
+function scaleIngredientAmount(amount: string, multiplier: number, ingredientName = ''): string {
+  const preparedAmount = isVagueAmount(amount) ? inferConcreteIngredientAmount(ingredientName) : amount
+  if (!Number.isFinite(multiplier) || multiplier <= 0 || Math.abs(multiplier - 1) < 0.01) {
+    return preparedAmount
+  }
+
+  const round = (value: number) => {
+    const rounded = Math.round(value * 10) / 10
+    return Number.isInteger(rounded) ? String(rounded) : String(rounded)
+  }
+  const normalized = preparedAmount
+    .replace(/(\d+)\s*到\s*(\d+)/g, '$1-$2')
+    .replace(/(\d+)\s*\/\s*(\d+)/g, (_match, numerator, denominator) => {
+      const value = Number(numerator) / Number(denominator)
+      return Number.isFinite(value) ? String(value) : _match
+    })
+  const scaled = normalized.replace(/(\d+(?:\.\d+)?)(?:\s*-\s*(\d+(?:\.\d+)?))?/g, (match, left, right) => {
+    const first = Number(left)
+    if (!Number.isFinite(first)) {
+      return match
+    }
+
+    if (right) {
+      const second = Number(right)
+      return `${round(first * multiplier)}-${round(second * multiplier)}`
+    }
+
+    return round(first * multiplier)
+  })
+  const friendlyScaled = scaled.replace(
+    /(\d+\.5)(\s*(?:个|根|颗|只|块|瓣))/g,
+    (_match, value, unit) => `约 ${Math.ceil(Number(value))}${unit}`,
+  )
+
+  return friendlyScaled === preparedAmount ? `${preparedAmount} × ${Math.round(multiplier * 10) / 10}` : friendlyScaled
+}
+
+function isVagueAmount(value: string): boolean {
+  return !value.trim() || /(适量|少许|若干|按需|随意|看情况|酌情)/.test(value)
+}
+
+function inferConcreteIngredientAmount(name: string): string {
+  const normalized = name.replace(/\s+/g, '')
+  const rules: Array<{ pattern: RegExp; amount: string }> = [
+    { pattern: /(西瓜|冬瓜|南瓜|土豆|茄子|萝卜|莲藕|花菜|包菜|白菜|青菜|豆角|菌菇|蘑菇|黄瓜|青椒|彩椒)/, amount: '约 300 克' },
+    { pattern: /(猪肉|牛肉|羊肉|鸡肉|鸡胸|鸡腿|排骨|大肠|肥肠|鱼|虾|肉片|肉丝)/, amount: '约 250 克' },
+    { pattern: /(鸡蛋|鸭蛋)/, amount: '2 个' },
+    { pattern: /(番茄|西红柿)/, amount: '2 个（约 300 克）' },
+    { pattern: /(葱|小葱|香葱)/, amount: '2 根' },
+    { pattern: /姜/, amount: '约 10 克' },
+    { pattern: /蒜/, amount: '3 瓣' },
+    { pattern: /(辣椒|小米辣|干辣椒)/, amount: '2 个' },
+    { pattern: /(盐)/, amount: '约 2 克' },
+    { pattern: /(糖|白糖)/, amount: '约 5 克' },
+    { pattern: /(生抽|酱油|料酒|醋|蚝油)/, amount: '1 汤勺（约 15 毫升）' },
+    { pattern: /(老抽)/, amount: '1 小勺（约 5 毫升）' },
+    { pattern: /(食用油|油)/, amount: '约 20 毫升' },
+    { pattern: /(淀粉)/, amount: '约 10 克' },
+    { pattern: /(水|清水|高汤)/, amount: '约 100 毫升' },
+  ]
+
+  return rules.find((rule) => rule.pattern.test(normalized))?.amount ?? '约 100 克'
+}
+
+function buildShoppingQuery(missingIngredients: MissingIngredient[]): string {
+  return missingIngredients
+    .map((item) => `${item.name}${item.amount ? ` ${item.amount}` : ''}`.trim())
+    .filter(Boolean)
+    .join(' ')
+}
+
+export function createPrepPlan(
+  db: DatabaseSync,
+  recipeId: string,
+  requestedServings: number,
+  userId?: string | null,
+  missingIngredients: MissingIngredient[] = [],
+): PrepPlan | null {
+  const recipe = getRecipeById(db, recipeId, userId)
+  if (!recipe) {
+    return null
+  }
+
+  const safeServings = Math.max(1, Math.min(12, Math.round(requestedServings)))
+  const baseServings = Math.max(1, recipe.servings)
+  const multiplier = safeServings / baseServings
+  const isImported = recipe.sourceType === 'imported' || recipe.id.startsWith('imported-')
+  const ingredients: PrepIngredient[] = recipe.ingredients.map((ingredient) => ({
+    name: ingredient.name,
+    originalAmount: ingredient.amount,
+    scaledAmount: scaleIngredientAmount(ingredient.amount, multiplier, ingredient.name),
+    note: isImported
+      ? '视频导入菜谱已按原视频识别到的基础份量换算，建议按实际锅具和食量微调。'
+      : undefined,
+  }))
+  const shoppingQuery = buildShoppingQuery(missingIngredients)
+  const encodedQuery = encodeURIComponent(shoppingQuery || ingredients.map((item) => item.name).join(' '))
+
+  return {
+    recipeId: recipe.id,
+    recipeTitle: recipe.title,
+    requestedServings: safeServings,
+    baseServings,
+    sourceType: recipe.sourceType ?? 'official',
+    ingredients,
+    tools: recipe.tools,
+    shoppingLinks: [
+      {
+        platform: 'meituan',
+        label: '去美团买菜搜索缺少食材',
+        url: `imeituan://www.meituan.com/search?q=${encodedQuery}`,
+      },
+      {
+        platform: 'jd',
+        label: '去京东到家搜索缺少食材',
+        url: `https://search.jd.com/Search?keyword=${encodedQuery}`,
+      },
+      {
+        platform: 'taobao',
+        label: '去淘宝搜索缺少食材',
+        url: `https://s.taobao.com/search?q=${encodedQuery}`,
+      },
+    ],
+    note: isImported
+      ? '这是由视频/文章生成的菜谱，食材克数会先按视频信息和目标人数换算，最终仍建议按食材大小、锅具容量和个人口味确认。'
+      : '已按菜谱原始份量等比例换算。确认食材齐全后即可进入跟做模式。',
   }
 }

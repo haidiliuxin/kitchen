@@ -1,5 +1,6 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import type { Recipe, CookingHistoryEntry } from '../../types.js'
+import type { RecipeDraftPayload } from '../../types.js'
 import type { CommunityPost } from './CommunityScreen.js'
 
 export type ProfileView = 'overview' | 'favorites' | 'history' | 'imports' | 'posts'
@@ -12,6 +13,8 @@ type ProfileScreenProps = {
   favoriteRecipes: Recipe[]
   recentHistoryItems: Array<{ entry: CookingHistoryEntry; recipe: Recipe }>
   myPosts: CommunityPost[]
+  myRecipes: Recipe[]
+  isCreatingRecipe: boolean
   view: ProfileView
   serverBaseUrl: string
   serverBaseUrlDraft: string
@@ -22,6 +25,8 @@ type ProfileScreenProps = {
   onLoginPasswordChange: (value: string) => void
   onLoginSubmit: () => void
   onLogout: () => void
+  onCreateRecipe: (payload: RecipeDraftPayload) => void
+  onToggleRecipeVisibility: (recipeId: string, visibility: 'public' | 'private') => void
   onServerBaseUrlDraftChange: (value: string) => void
   onSaveServerBaseUrl: () => void
   onResetServerBaseUrl: () => void
@@ -39,7 +44,9 @@ export function ProfileScreen({
   currentUserLabel,
   favoriteRecipes,
   recentHistoryItems,
-  myPosts,
+  myPosts: _myPosts,
+  myRecipes,
+  isCreatingRecipe,
   view,
   serverBaseUrl,
   serverBaseUrlDraft,
@@ -50,6 +57,8 @@ export function ProfileScreen({
   onLoginPasswordChange,
   onLoginSubmit,
   onLogout,
+  onCreateRecipe,
+  onToggleRecipeVisibility,
   onServerBaseUrlDraftChange,
   onSaveServerBaseUrl,
   onResetServerBaseUrl,
@@ -57,8 +66,46 @@ export function ProfileScreen({
   onOpenFavoriteRecipe,
   onOpenHistoryRecipe,
   onOpenImportHistory,
-  onOpenMyPost,
+  onOpenMyPost: _onOpenMyPost,
 }: ProfileScreenProps) {
+  const [recipeTitle, setRecipeTitle] = useState('')
+  const [recipeDescription, setRecipeDescription] = useState('')
+  const [recipeServings, setRecipeServings] = useState(2)
+  const [recipeIngredientsText, setRecipeIngredientsText] = useState('')
+  const [recipeStepsText, setRecipeStepsText] = useState('')
+
+  const submitRecipeDraft = () => {
+    const ingredients = recipeIngredientsText
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [name, ...amountParts] = line.split(/\s+/)
+        return {
+          name,
+          amount: amountParts.join(' ') || '适量',
+        }
+      })
+    const steps = recipeStepsText
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line, index) => ({
+        title: `第 ${index + 1} 步`,
+        instruction: line,
+        durationMinutes: 3,
+      }))
+
+    onCreateRecipe({
+      title: recipeTitle.trim(),
+      description: recipeDescription.trim() || '自己创建的菜谱。',
+      servings: recipeServings,
+      ingredients,
+      steps,
+      tags: ['自制菜谱'],
+    })
+  }
+
   const entryCards = useMemo(
     () => [
       {
@@ -88,14 +135,14 @@ export function ProfileScreen({
       {
         id: 'posts' as const,
         kicker: '发布',
-        title: '我的发布',
+        title: '我的菜谱',
         description:
-          myPosts.length > 0
-            ? `已经发布 ${myPosts.length} 条心得，点进去集中查看。`
-            : '把社区发布内容从总览页收进独立页面。',
+          myRecipes.length > 0
+            ? `已经拥有 ${myRecipes.length} 道自己的菜谱，可以公开或保持私有。`
+            : '创建自己的菜谱，或把导入菜谱发布给其他用户。',
       },
     ],
-    [favoriteRecipes.length, recentHistoryItems.length, myPosts.length],
+    [favoriteRecipes.length, recentHistoryItems.length, myRecipes.length],
   )
 
   const renderTopbar = (title: string, kicker: string) => (
@@ -223,37 +270,71 @@ export function ProfileScreen({
     return (
       <div className="profile-subpage-overlay">
         <main className="mobile-page-stack profile-subpage-sheet">
-          {renderTopbar('我的发布', '发布')}
+          {renderTopbar('我的菜谱', '发布')}
             <section className="panel mobile-page-section profile-posts-card ds-card-section">
-            {myPosts.length > 0 ? (
+            <div className="profile-recipe-create-card ds-card ds-card-task">
+              <span className="section-kicker">制作菜谱</span>
+              <h3>手动创建一道菜</h3>
+              <label className="search-field">
+                <span>菜谱名</span>
+                <input value={recipeTitle} onChange={(event) => setRecipeTitle(event.target.value)} placeholder="例如：空气炸锅鸡翅" />
+              </label>
+              <label className="search-field">
+                <span>简介</span>
+                <input value={recipeDescription} onChange={(event) => setRecipeDescription(event.target.value)} placeholder="这道菜适合什么场景？" />
+              </label>
+              <label className="search-field">
+                <span>人数</span>
+                <input type="number" min={1} max={12} value={recipeServings} onChange={(event) => setRecipeServings(Number(event.target.value))} />
+              </label>
+              <label className="search-field">
+                <span>食材，每行一个：鸡翅 8 个</span>
+                <textarea value={recipeIngredientsText} onChange={(event) => setRecipeIngredientsText(event.target.value)} placeholder={'鸡翅 8 个\n生抽 2 勺\n蜂蜜 1 勺'} />
+              </label>
+              <label className="search-field">
+                <span>步骤，每行一步</span>
+                <textarea value={recipeStepsText} onChange={(event) => setRecipeStepsText(event.target.value)} placeholder={'鸡翅划刀并腌 20 分钟\n放入空气炸锅 180 度 12 分钟\n翻面再烤 8 分钟'} />
+              </label>
+              <button className="primary-button secondary-action-button" onClick={submitRecipeDraft} disabled={isCreatingRecipe || !recipeTitle.trim() || !recipeIngredientsText.trim() || !recipeStepsText.trim()}>
+                {isCreatingRecipe ? '保存中...' : '保存为私有菜谱'}
+              </button>
+            </div>
+
+            {myRecipes.length > 0 ? (
               <div className="community-feed">
-                {myPosts.map((post) => (
-                  <article key={post.id} className="community-post-card profile-post-card ds-card ds-card-community">
+                {myRecipes.map((recipe) => (
+                  <article key={recipe.id} className="community-post-card profile-post-card ds-card ds-card-community">
                     <div className="community-post-head">
                       <div>
-                        <span className="section-kicker">{post.author}</span>
-                        <h3>{post.title}</h3>
+                        <span className="section-kicker">{recipe.visibility === 'public' ? '已公开' : '私有'}</span>
+                        <h3>{recipe.title}</h3>
                       </div>
-                      <span className="community-like-pill">{post.likes} 赞</span>
+                      <span className="community-like-pill">{recipe.sourceType === 'imported' ? '导入' : '自制'}</span>
                     </div>
-                    <p>{post.content}</p>
+                    <p>{recipe.description}</p>
                     <div className="tag-row">
-                      {post.tags.map((tag) => (
+                      {recipe.tags.map((tag) => (
                         <span key={tag} className="tag">
                           {tag}
                         </span>
                       ))}
                     </div>
-                    <button className="ghost-button small-button" onClick={() => onOpenMyPost(post.id)}>
-                      查看详情
+                    <button className="ghost-button small-button" onClick={() => onOpenFavoriteRecipe(recipe.id)}>
+                      查看菜谱
+                    </button>
+                    <button
+                      className="ghost-button small-button"
+                      onClick={() => onToggleRecipeVisibility(recipe.id, recipe.visibility === 'public' ? 'private' : 'public')}
+                    >
+                      {recipe.visibility === 'public' ? '设为私有' : '发布公开'}
                     </button>
                   </article>
                 ))}
               </div>
             ) : (
               <div className="empty-state ds-card ds-card-state">
-                <h3>你还没有发布内容</h3>
-                <p>去社区发一条心得后，这里就会显示你发布过的内容。</p>
+                <h3>你还没有自己的菜谱</h3>
+                <p>可以手动创建，也可以先从视频/文章导入。</p>
               </div>
             )}
           </section>

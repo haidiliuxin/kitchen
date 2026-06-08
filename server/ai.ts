@@ -1,12 +1,6 @@
 import { getAssistantReply } from '../src/lib/assistant.js'
 import type { Recipe, Step } from '../src/types.js'
-
-const deepseekBaseUrl = (process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com').replace(
-  /\/$/,
-  '',
-)
-const deepseekModel = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat'
-const requestTimeoutMs = Number(process.env.DEEPSEEK_TIMEOUT_MS ?? 20000)
+import { callChatCompletion, getLlmRuntimeInfo, isLlmConfigured, type LlmProvider } from './llm.js'
 
 type AssistantContext = {
   recipe: Recipe
@@ -15,25 +9,12 @@ type AssistantContext = {
   question: string
 }
 
-type DeepSeekResponse = {
-  choices?: Array<{
-    message?: {
-      content?: string
-    }
-  }>
-}
-
 export function isAiConfigured(): boolean {
-  return Boolean(process.env.DEEPSEEK_API_KEY?.trim())
+  return isLlmConfigured()
 }
 
 export function getAiRuntimeInfo() {
-  return {
-    configured: isAiConfigured(),
-    provider: 'deepseek',
-    model: deepseekModel,
-    baseUrl: deepseekBaseUrl,
-  }
+  return getLlmRuntimeInfo()
 }
 
 function buildSystemPrompt(): string {
@@ -81,69 +62,42 @@ function getFallbackAnswer(context: AssistantContext): string {
 
 export async function getKitchenCoachReply(context: AssistantContext): Promise<{
   answer: string
-  mode: 'deepseek' | 'fallback'
+  mode: LlmProvider | 'fallback'
 }> {
-  const apiKey = process.env.DEEPSEEK_API_KEY?.trim()
   const fallbackAnswer = getFallbackAnswer(context)
 
-  if (!apiKey) {
+  if (!isAiConfigured()) {
     return {
       answer: fallbackAnswer,
       mode: 'fallback',
     }
   }
 
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), requestTimeoutMs)
-
   try {
-    const response = await fetch(`${deepseekBaseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: deepseekModel,
-        temperature: 0.3,
-        max_tokens: 400,
-        messages: [
-          {
-            role: 'system',
-            content: buildSystemPrompt(),
-          },
-          {
-            role: 'user',
-            content: buildUserPrompt(context),
-          },
-        ],
-      }),
-      signal: controller.signal,
+    const answer = await callChatCompletion({
+      temperature: 0.3,
+      maxTokens: 400,
+      messages: [
+        {
+          role: 'system',
+          content: buildSystemPrompt(),
+        },
+        {
+          role: 'user',
+          content: buildUserPrompt(context),
+        },
+      ],
     })
-
-    if (!response.ok) {
-      const raw = await response.text()
-      throw new Error(`DeepSeek API ${response.status}: ${raw.slice(0, 400)}`)
-    }
-
-    const payload = (await response.json()) as DeepSeekResponse
-    const answer = payload.choices?.[0]?.message?.content?.trim()
-
-    if (!answer) {
-      throw new Error('DeepSeek 返回了空内容。')
-    }
 
     return {
       answer,
-      mode: 'deepseek',
+      mode: getLlmRuntimeInfo().provider,
     }
   } catch (error) {
-    console.error('DeepSeek request failed, falling back to local assistant:', error)
+    console.error('LLM request failed, falling back to local assistant:', error)
     return {
       answer: fallbackAnswer,
       mode: 'fallback',
     }
-  } finally {
-    clearTimeout(timeout)
   }
 }

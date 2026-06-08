@@ -8,23 +8,25 @@ import { CookScreen } from './features/kitchen/CookScreen.js'
 import { FinishScreen } from './features/kitchen/FinishScreen.js'
 import { HomeScreen } from './features/kitchen/HomeScreen.js'
 import { ImportScreen } from './features/kitchen/ImportScreen.js'
+import { PrepScreen } from './features/kitchen/PrepScreen.js'
 import { ProfileScreen } from './features/kitchen/ProfileScreen.js'
 import type { ProfileView } from './features/kitchen/ProfileScreen.js'
 import { SearchHubScreen } from './features/kitchen/SearchHubScreen.js'
 import { useKitchenApp } from './features/kitchen/useKitchenApp.js'
 import {
+  loginOrRegister,
+  logoutSession,
+  createRecipeDraft,
   getConfiguredApiBaseUrl,
   resetConfiguredApiBaseUrl,
   setConfiguredApiBaseUrl,
   testApiServer,
+  updateRecipeVisibility,
 } from './lib/api.js'
+import type { AuthSession } from './types.js'
 
 type MainTab = 'home' | 'community' | 'profile'
-type AuthState = {
-  identifier: string
-  password: string
-  displayName: string
-}
+type AuthState = AuthSession
 type CommunityCommentsByPostId = Record<string, CommunityComment[]>
 
 const AUTH_STORAGE_KEY = 'kitchen-helper:auth'
@@ -140,6 +142,7 @@ function App() {
   const [serverBaseUrlDraft, setServerBaseUrlDraft] = useState(() => getConfiguredApiBaseUrl())
   const [serverConnectionStatus, setServerConnectionStatus] = useState<string | null>(null)
   const [isTestingServerConnection, setIsTestingServerConnection] = useState(false)
+  const [isCreatingRecipe, setIsCreatingRecipe] = useState(false)
   const [recentSearches, setRecentSearches] = useState<string[]>([])
   const [returnToSearchAfterDetail, setReturnToSearchAfterDetail] = useState(false)
   const [homeView, setHomeView] = useState<'default' | 'history' | 'detail' | 'topics' | 'filters'>('default')
@@ -156,9 +159,9 @@ function App() {
   const lastRootBackAtRef = useRef(0)
   const handleAppBackRef = useRef<() => boolean>(() => true)
 
-  const isCookingFlow = app.screen === 'cook' || app.screen === 'finish'
+  const isCookingFlow = app.screen === 'prep' || app.screen === 'cook' || app.screen === 'finish'
   const isLoggedIn = Boolean(authState)
-  const currentUserLabel = authState?.displayName ?? '游客'
+  const currentUserLabel = authState?.user?.displayName ?? '游客'
   const shouldShowBottomTabBar =
     !isSearchScreenOpen && !isImportScreenOpen && !(activeTab === 'home' && isHomeDetailOpen)
   const scrollPositionsRef = useRef<Record<string, number>>({})
@@ -209,6 +212,11 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (authState && !authState.user?.id) {
+      setAuthState(null)
+      return
+    }
+
     if (typeof window === 'undefined') {
       return
     }
@@ -314,7 +322,7 @@ function App() {
 
   useEffect(() => {
     if (authState) {
-      setLoginIdentifier(authState.identifier)
+      setLoginIdentifier(authState.user.identifier)
       return
     }
 
@@ -337,6 +345,12 @@ function App() {
   }
 
   const handleAppBack = () => {
+    if (app.screen === 'prep') {
+      app.setScreen('discover')
+      openHomeEntry('detail', app.selectedRecipe?.id ?? null)
+      return true
+    }
+
     if (app.screen === 'cook') {
       app.disableVoice()
       app.setScreen('discover')
@@ -499,6 +513,7 @@ function App() {
   }
 
   const myCommunityPosts = communityPosts.filter((post) => post.isMine)
+  const myRecipes = app.recipesData.filter((recipe) => authState?.user.id && recipe.ownerUserId === authState.user.id)
   const favoriteRecipes = app.recipesData.filter((recipe) => favoriteRecipeIds.includes(recipe.id))
   const recentHistoryRecipes = app.history
     .map((entry) => ({
@@ -519,30 +534,70 @@ function App() {
     setRecentSearches([])
   }
 
-  const handleLoginSubmit = () => {
+  const handleLoginSubmit = async () => {
     const identifier = loginIdentifier.trim()
     const password = loginPassword.trim()
     if (!identifier || !password) {
       return
     }
 
-    setAuthState({
-      identifier,
-      password,
-      displayName: identifier.includes('@') ? identifier.split('@')[0] : identifier,
-    })
-    setLoginPassword('')
+    try {
+      const session = await loginOrRegister(identifier, password)
+      setAuthState(session)
+      setLoginPassword('')
+      app.setReloadNonce((previous) => previous + 1)
+      app.setNotice(session.isNewUser ? '已创建账户并登录。' : '登录成功。')
+    } catch (error) {
+      app.setNotice(error instanceof Error ? error.message : '登录失败，请稍后再试。')
+    }
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await logoutSession()
     setAuthState(null)
     setLoginIdentifier('')
     setLoginPassword('')
+    app.setReloadNonce((previous) => previous + 1)
+    app.setNotice('已退出登录。')
   }
 
   const handleProfileViewChange = (nextView: ProfileView) => {
     scrollPositionsRef.current[`tab:profile:${profileView}`] = getScrollTop()
     setProfileView(nextView)
+  }
+
+  const handleCreateRecipe = async (payload: Parameters<typeof createRecipeDraft>[0]) => {
+    if (!isLoggedIn) {
+      app.setNotice('请先登录再创建菜谱。')
+      return
+    }
+
+    setIsCreatingRecipe(true)
+    try {
+      const recipe = await createRecipeDraft(payload)
+      app.setReloadNonce((previous) => previous + 1)
+      app.setSelectedRecipeId(recipe.id)
+      app.setNotice('菜谱已保存为私有。')
+    } catch (error) {
+      app.setNotice(error instanceof Error ? error.message : '创建菜谱失败。')
+    } finally {
+      setIsCreatingRecipe(false)
+    }
+  }
+
+  const handleToggleRecipeVisibility = async (recipeId: string, visibility: 'public' | 'private') => {
+    if (!isLoggedIn) {
+      app.setNotice('请先登录。')
+      return
+    }
+
+    try {
+      await updateRecipeVisibility(recipeId, visibility)
+      app.setReloadNonce((previous) => previous + 1)
+      app.setNotice(visibility === 'public' ? '菜谱已公开，其他用户可以看到了。' : '菜谱已设为私有。')
+    } catch (error) {
+      app.setNotice(error instanceof Error ? error.message : '更新菜谱状态失败。')
+    }
   }
 
   const handleSaveServerBaseUrl = () => {
@@ -600,6 +655,26 @@ function App() {
 
       {isCookingFlow ? (
         <>
+          {app.screen === 'prep' && app.selectedRecipe && (
+            <PrepScreen
+              selectedRecipe={app.selectedRecipe}
+              prepPlan={app.prepPlan}
+              servings={app.prepServings}
+              missingIngredients={app.prepMissingIngredients}
+              isLoading={app.isPrepPlanLoading}
+              error={app.prepPlanError}
+              onBack={() => {
+                app.setScreen('discover')
+                openHomeEntry('detail', app.selectedRecipe?.id ?? null)
+              }}
+              onServingsChange={app.setPrepServings}
+              onToggleMissingIngredient={app.toggleMissingIngredient}
+              onMissingAmountChange={app.updateMissingIngredientAmount}
+              onRefreshPlan={app.refreshPrepPlan}
+              onStartCooking={app.startCooking}
+            />
+          )}
+
           {app.screen === 'cook' && app.selectedRecipe && app.currentStep && (
             <CookScreen
               selectedRecipe={app.selectedRecipe}
@@ -736,12 +811,22 @@ function App() {
                     isHistoryLoading={app.isHistoryLoading}
                     recipesError={app.recipesError}
                     historyCount={app.history.length}
-                    history={app.history}
-                    currentRecipeCompletions={app.currentRecipeCompletions}
+              history={app.history}
+              currentRecipeCompletions={app.currentRecipeCompletions}
                     requestedEntry={homeEntryRequest}
                     favoriteRecipeIds={favoriteRecipeIds}
                     ongoingCookingSession={lastCookingSession}
-                    onStartCooking={app.startCooking}
+                    onStartCooking={(recipeId) => {
+                      setIsHomeDetailOpen(false)
+                      setHomeView('default')
+                      setReturnToSearchAfterDetail(false)
+                      if (recipeId) {
+                        app.openPrep(recipeId)
+                        return
+                      }
+
+                      app.openPrep()
+                    }}
                     onResumeCooking={(recipeId, stepIndex) => app.resumeCooking(recipeId, stepIndex)}
                     onToggleFavorite={toggleFavoriteRecipe}
                     onRetry={app.retryLoading}
@@ -789,6 +874,8 @@ function App() {
                     favoriteRecipes={favoriteRecipes}
                     recentHistoryItems={recentHistoryRecipes}
                     myPosts={myCommunityPosts}
+                    myRecipes={myRecipes}
+                    isCreatingRecipe={isCreatingRecipe}
                     view={profileView}
                     serverBaseUrl={serverBaseUrl}
                     serverBaseUrlDraft={serverBaseUrlDraft}
@@ -797,8 +884,18 @@ function App() {
                     onViewChange={handleProfileViewChange}
                     onLoginIdentifierChange={setLoginIdentifier}
                     onLoginPasswordChange={setLoginPassword}
-                    onLoginSubmit={handleLoginSubmit}
-                    onLogout={handleLogout}
+                    onLoginSubmit={() => {
+                      void handleLoginSubmit()
+                    }}
+                    onLogout={() => {
+                      void handleLogout()
+                    }}
+                    onCreateRecipe={(payload) => {
+                      void handleCreateRecipe(payload)
+                    }}
+                    onToggleRecipeVisibility={(recipeId, visibility) => {
+                      void handleToggleRecipeVisibility(recipeId, visibility)
+                    }}
                     onServerBaseUrlDraftChange={setServerBaseUrlDraft}
                     onSaveServerBaseUrl={handleSaveServerBaseUrl}
                     onResetServerBaseUrl={handleResetServerBaseUrl}

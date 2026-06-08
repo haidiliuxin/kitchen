@@ -3,7 +3,7 @@ import { TextToSpeech } from '@capacitor-community/text-to-speech'
 import type { CSSProperties } from 'react'
 import type { Difficulty, Recipe } from '../../types.js'
 
-export type Screen = 'discover' | 'cook' | 'finish'
+export type Screen = 'discover' | 'prep' | 'cook' | 'finish'
 
 export type TimeLimit = '全部' | 15 | 20 | 30 | 45
 

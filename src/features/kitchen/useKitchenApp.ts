@@ -10,6 +10,7 @@ import {
 } from 'react'
 import {
   askAssistant,
+  fetchPrepPlan,
   fetchHistory,
   fetchRecommendations,
   fetchRecipes,
@@ -21,7 +22,7 @@ import {
   getQuickPrompts,
   getWelcomeMessage,
 } from '../../lib/assistant.js'
-import type { CookingHistoryEntry, Difficulty, Recipe } from '../../types.js'
+import type { CookingHistoryEntry, Difficulty, MissingIngredient, PrepPlan, Recipe } from '../../types.js'
 import {
   createMessage,
   speak,
@@ -129,6 +130,12 @@ export function useKitchenApp() {
   const [isAssistantLoading, setIsAssistantLoading] = useState(false)
   const [isFinishing, setIsFinishing] = useState(false)
   const [reloadNonce, setReloadNonce] = useState(0)
+  const [prepServings, setPrepServings] = useState(2)
+  const [prepPlan, setPrepPlan] = useState<PrepPlan | null>(null)
+  const [prepMissingIngredients, setPrepMissingIngredients] = useState<MissingIngredient[]>([])
+  const [isPrepPlanLoading, setIsPrepPlanLoading] = useState(false)
+  const [prepPlanError, setPrepPlanError] = useState<string | null>(null)
+  const [prepReloadNonce, setPrepReloadNonce] = useState(0)
   const [recognitionSupported, setRecognitionSupported] = useState(
     isNativePlatform ? true : webRecognitionSupported,
   )
@@ -149,6 +156,45 @@ export function useKitchenApp() {
   const currentRecipeCompletions = selectedRecipe
     ? history.filter((entry) => entry.recipeId === selectedRecipe.id).length
     : 0
+
+  useEffect(() => {
+    if (!selectedRecipe || screen !== 'prep') {
+      return
+    }
+
+    let cancelled = false
+
+    const loadPrepPlan = async () => {
+      setIsPrepPlanLoading(true)
+      setPrepPlanError(null)
+
+      try {
+        const plan = await fetchPrepPlan(selectedRecipe.id, prepServings, prepMissingIngredients)
+        if (cancelled) {
+          return
+        }
+
+        setPrepPlan(plan)
+      } catch (error) {
+        if (cancelled) {
+          return
+        }
+
+        setPrepPlan(null)
+        setPrepPlanError(error instanceof Error ? error.message : '备菜计划生成失败，请稍后再试。')
+      } finally {
+        if (!cancelled) {
+          setIsPrepPlanLoading(false)
+        }
+      }
+    }
+
+    void loadPrepPlan()
+
+    return () => {
+      cancelled = true
+    }
+  }, [prepMissingIngredients, prepReloadNonce, prepServings, screen, selectedRecipe])
 
   useEffect(() => {
     let cancelled = false
@@ -359,6 +405,11 @@ export function useKitchenApp() {
     return false
   })
 
+  const looksLikeKitchenQuestion = (transcript: string): boolean => {
+    const normalized = transcript.replace(/\s+/g, '')
+    return /(怎么|为什么|多久|多少|什么程度|怎么办|可以不|能不能|要不要|火候|熟了|糊了|咸了|淡了|太干|太稀|下一步|上一步|重复|朗读|计时)/.test(normalized)
+  }
+
   const handleSpokenInput = useEffectEvent(async (transcript: string) => {
     const safeTranscript = transcript.trim()
     if (!safeTranscript) {
@@ -372,10 +423,13 @@ export function useKitchenApp() {
       setWakeWords(interpretation.wakeWords)
 
       if (!interpretation.activated) {
-        return
+        if (!looksLikeKitchenQuestion(safeTranscript)) {
+          return
+        }
+        interpretedTranscript = safeTranscript
+      } else {
+        interpretedTranscript = interpretation.cleanedTranscript.trim()
       }
-
-      interpretedTranscript = interpretation.cleanedTranscript.trim()
       if (!interpretedTranscript) {
         setNotice(`已唤醒语音助手，请继续说指令。当前唤醒词：${interpretation.wakeWords.join(' / ')}`)
         return
@@ -630,12 +684,7 @@ export function useKitchenApp() {
 
     if (recognitionMode === 'native') {
       try {
-        const availability = await SpeechRecognition.available()
-        if (!availability.available) {
-          setRecognitionSupported(false)
-          setNotice('当前手机没有可用的系统语音识别服务，请先启用系统语音助手或语音输入。')
-          return
-        }
+        await SpeechRecognition.available().catch(() => ({ available: true }))
 
         const permissions = await SpeechRecognition.checkPermissions()
         const currentPermission = permissions.speechRecognition
@@ -665,6 +714,26 @@ export function useKitchenApp() {
     setVoiceEnabled(false)
   }
 
+  const openPrep = (recipeId?: string) => {
+    const recipe = recipeId
+      ? recipesData.find((item) => item.id === recipeId) ?? selectedRecipe
+      : selectedRecipe
+
+    if (!recipe) {
+      return
+    }
+
+    startTransition(() => {
+      setSelectedRecipeId(recipe.id)
+      setPrepServings(Math.max(1, recipe.servings))
+      setPrepMissingIngredients([])
+      setPrepPlan(null)
+      setPrepPlanError(null)
+      setScreen('prep')
+      setNotice(null)
+    })
+  }
+
   const startCooking = () => {
     if (!selectedRecipe) {
       return
@@ -679,6 +748,22 @@ export function useKitchenApp() {
       setAssistantInput('')
       setNotice(null)
     })
+  }
+
+  const toggleMissingIngredient = (name: string, defaultAmount: string) => {
+    setPrepMissingIngredients((previous) => {
+      if (previous.some((item) => item.name === name)) {
+        return previous.filter((item) => item.name !== name)
+      }
+
+      return [...previous, { name, amount: defaultAmount }]
+    })
+  }
+
+  const updateMissingIngredientAmount = (name: string, amount: string) => {
+    setPrepMissingIngredients((previous) =>
+      previous.map((item) => (item.name === name ? { ...item, amount } : item)),
+    )
   }
 
   const resumeCooking = (recipeId: string, stepIndex: number) => {
@@ -773,6 +858,11 @@ export function useKitchenApp() {
     notice,
     isAssistantLoading,
     isFinishing,
+    prepServings,
+    prepPlan,
+    prepMissingIngredients,
+    isPrepPlanLoading,
+    prepPlanError,
     quickPrompts,
     currentRecipeCompletions,
     voiceStatus,
@@ -785,12 +875,17 @@ export function useKitchenApp() {
     setAssistantInput,
     setIsTimerRunning,
     setTimerLeft,
+    setPrepServings,
     setVoiceEnabled,
     toggleVoice,
     disableVoice,
     setNotice,
     jumpToStep,
+    openPrep,
     startCooking,
+    toggleMissingIngredient,
+    updateMissingIngredientAmount,
+    refreshPrepPlan: () => setPrepReloadNonce((previous) => previous + 1),
     resumeCooking,
     finishCooking,
     retryLoading,

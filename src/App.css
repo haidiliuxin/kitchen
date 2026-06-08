@@ -5024,9 +5024,123 @@ button {
     font-size: 12px;
   }
 
-  .bottom-tab-icon {
-    width: 26px;
-    height: 26px;
-    font-size: 14px;
-  }
+.bottom-tab-icon {
+  width: 26px;
+  height: 26px;
+  font-size: 14px;
+}
+}
+
+.prep-screen {
+  padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+}
+
+.prep-hero h1 {
+  margin: 8px 0 10px;
+  font-size: clamp(34px, 9vw, 52px);
+  line-height: 1.06;
+}
+
+.prep-serving-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.prep-serving-button {
+  min-height: 48px;
+  border: 1px solid rgba(229, 113, 40, 0.2);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+  color: #7a4a2a;
+  font-weight: 800;
+}
+
+.prep-serving-button-active {
+  background: linear-gradient(135deg, #f97316, #fb923c);
+  color: #fff;
+  box-shadow: 0 14px 30px rgba(249, 115, 22, 0.24);
+}
+
+.prep-ingredient-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.prep-ingredient-item {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(122, 83, 52, 0.1);
+  border-radius: 20px;
+  background: rgba(255, 252, 247, 0.92);
+}
+
+.prep-ingredient-item label {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.prep-ingredient-item input[type='checkbox'] {
+  width: 22px;
+  height: 22px;
+  margin-top: 3px;
+  accent-color: #f97316;
+}
+
+.prep-ingredient-item span {
+  display: grid;
+  gap: 4px;
+}
+
+.prep-ingredient-item strong {
+  color: #2a2018;
+  font-size: 17px;
+}
+
+.prep-ingredient-item small {
+  color: #8a6b55;
+  font-weight: 800;
+}
+
+.prep-ingredient-item em {
+  color: #9a7a61;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.5;
+}
+
+.prep-missing-input {
+  min-height: 44px;
+  border: 1px solid rgba(122, 83, 52, 0.14);
+  border-radius: 16px;
+  padding: 0 14px;
+  background: #fff;
+  font: inherit;
+}
+
+.prep-note {
+  margin: 16px 0 0;
+  color: #7f6651;
+  line-height: 1.7;
+}
+
+.prep-shopping-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.prep-shopping-link {
+  justify-content: center;
+  text-align: center;
+}
+
+.prep-bottom-bar {
+  z-index: 35;
 }

@@ -28,8 +28,30 @@ function createTables(db: DatabaseSync): void {
       risk_note TEXT NOT NULL,
       description TEXT NOT NULL,
       palette_start TEXT NOT NULL,
-      palette_end TEXT NOT NULL
+      palette_end TEXT NOT NULL,
+      visibility TEXT NOT NULL DEFAULT 'official',
+      source_type TEXT NOT NULL DEFAULT 'official',
+      owner_user_id TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      identifier TEXT NOT NULL UNIQUE,
+      display_name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+      token TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id
+      ON auth_sessions (user_id);
 
     CREATE TABLE IF NOT EXISTS recipe_tags (
       recipe_id TEXT NOT NULL,
@@ -149,6 +171,7 @@ function createTables(db: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS cooking_history (
       id TEXT PRIMARY KEY,
       recipe_id TEXT NOT NULL,
+      user_id TEXT,
       finished_at TEXT NOT NULL,
       FOREIGN KEY (recipe_id) REFERENCES recipes(id)
     );
@@ -168,6 +191,46 @@ function ensureStepVideoSegmentColumns(db: DatabaseSync): void {
 
   if (!columnNames.has('end_seconds')) {
     db.exec('ALTER TABLE step_videos ADD COLUMN end_seconds REAL')
+  }
+}
+
+function ensureRecipeOwnershipColumns(db: DatabaseSync): void {
+  const rows = db.prepare('PRAGMA table_info(recipes)').all() as Array<{ name: string }>
+  const columnNames = new Set(rows.map((row) => row.name))
+
+  if (!columnNames.has('visibility')) {
+    db.exec("ALTER TABLE recipes ADD COLUMN visibility TEXT NOT NULL DEFAULT 'official'")
+  }
+
+  if (!columnNames.has('source_type')) {
+    db.exec("ALTER TABLE recipes ADD COLUMN source_type TEXT NOT NULL DEFAULT 'official'")
+  }
+
+  if (!columnNames.has('owner_user_id')) {
+    db.exec('ALTER TABLE recipes ADD COLUMN owner_user_id TEXT')
+  }
+
+  db.exec(`
+    UPDATE recipes
+    SET visibility = COALESCE(NULLIF(visibility, ''), 'official'),
+        source_type = COALESCE(NULLIF(source_type, ''), 'official')
+  `)
+
+  db.exec(`
+    UPDATE recipes
+    SET visibility = 'public',
+        source_type = 'imported'
+    WHERE id LIKE 'imported-%'
+      AND owner_user_id IS NULL
+  `)
+}
+
+function ensureCookingHistoryUserColumn(db: DatabaseSync): void {
+  const rows = db.prepare('PRAGMA table_info(cooking_history)').all() as Array<{ name: string }>
+  const columnNames = new Set(rows.map((row) => row.name))
+
+  if (!columnNames.has('user_id')) {
+    db.exec('ALTER TABLE cooking_history ADD COLUMN user_id TEXT')
   }
 }
 
@@ -211,8 +274,11 @@ function seedRecipes(db: DatabaseSync): void {
         risk_note,
         description,
         palette_start,
-        palette_end
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        palette_end,
+        visibility,
+        source_type,
+        owner_user_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
 
     const insertTag = db.prepare(`
@@ -291,6 +357,9 @@ function seedRecipes(db: DatabaseSync): void {
         recipe.description,
         recipe.palette.start,
         recipe.palette.end,
+        'official',
+        'official',
+        null,
       )
 
       recipe.tags.forEach((tag, index) => {
@@ -374,6 +443,8 @@ export function createDatabase(): DatabaseSync {
   const db = new DatabaseSync(databaseFilePath)
   createTables(db)
   ensureStepVideoSegmentColumns(db)
+  ensureRecipeOwnershipColumns(db)
+  ensureCookingHistoryUserColumn(db)
   seedRecipes(db)
   return db
 }

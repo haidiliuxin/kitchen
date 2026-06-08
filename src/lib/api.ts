@@ -1,13 +1,18 @@
 import type {
   CookingHistoryEntry,
+  AuthSession,
   ImportAnalyzeResponse,
   ImportSourceType,
+  MissingIngredient,
+  PrepPlan,
   Recipe,
+  RecipeDraftPayload,
   RecipeFilters,
   VoiceInterpretation,
 } from '../types.js'
 
 export const API_BASE_URL_STORAGE_KEY = 'kitchen-helper:api-base-url'
+const AUTH_STORAGE_KEY = 'kitchen-helper:auth'
 
 const bundledApiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').trim()
 
@@ -52,6 +57,42 @@ function buildApiUrl(path: string): string {
   return `${apiBaseUrl.replace(/\/$/, '')}${path}`
 }
 
+export function buildMediaProxyUrl(url: string, referer?: string): string {
+  const trimmedUrl = url.trim()
+  if (!trimmedUrl || !/^https?:\/\//i.test(trimmedUrl)) {
+    return trimmedUrl
+  }
+
+  const params = new URLSearchParams({ url: trimmedUrl })
+  if (referer?.trim()) {
+    params.set('referer', referer.trim())
+  }
+
+  return buildApiUrl(`/api/media/proxy?${params.toString()}`)
+}
+
+function getAuthSession(): AuthSession | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  try {
+    const raw = window.localStorage.getItem(AUTH_STORAGE_KEY)
+    if (!raw) {
+      return null
+    }
+
+    const parsed = JSON.parse(raw) as AuthSession
+    if (parsed?.token && parsed?.user?.id) {
+      return parsed
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}
+
 export async function testApiServer(baseUrl = getConfiguredApiBaseUrl()): Promise<{
   status: string
 }> {
@@ -69,6 +110,7 @@ async function requestJson<T>(input: string, init?: RequestInit): Promise<T> {
   const response = await fetch(buildApiUrl(input), {
     headers: {
       'Content-Type': 'application/json',
+      ...(getAuthSession()?.token ? { Authorization: `Bearer ${getAuthSession()!.token}` } : {}),
       ...(init?.headers ?? {}),
     },
     ...init,
@@ -90,6 +132,26 @@ async function requestJson<T>(input: string, init?: RequestInit): Promise<T> {
   }
 
   return (await response.json()) as T
+}
+
+export async function loginOrRegister(identifier: string, password: string): Promise<AuthSession> {
+  const session = await requestJson<AuthSession>('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ identifier, password }),
+  })
+
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session))
+  }
+
+  return session
+}
+
+export async function logoutSession(): Promise<void> {
+  await requestJson<{ status: string }>('/api/auth/logout', { method: 'POST' }).catch(() => undefined)
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem(AUTH_STORAGE_KEY)
+  }
 }
 
 export async function fetchRecipes(filters: RecipeFilters = {}): Promise<Recipe[]> {
@@ -129,6 +191,34 @@ export async function fetchRecommendations(excludeRecipeId?: string): Promise<Re
 
   const suffix = params.toString() ? `?${params.toString()}` : ''
   return requestJson<Recipe[]>(`/api/recommendations${suffix}`)
+}
+
+export async function fetchPrepPlan(
+  recipeId: string,
+  servings: number,
+  missingIngredients: MissingIngredient[] = [],
+): Promise<PrepPlan> {
+  return requestJson<PrepPlan>(`/api/recipes/${encodeURIComponent(recipeId)}/prep-plan`, {
+    method: 'POST',
+    body: JSON.stringify({ servings, missingIngredients }),
+  })
+}
+
+export async function createRecipeDraft(payload: RecipeDraftPayload): Promise<Recipe> {
+  return requestJson<Recipe>('/api/recipes', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function updateRecipeVisibility(
+  recipeId: string,
+  visibility: 'public' | 'private',
+): Promise<Recipe> {
+  return requestJson<Recipe>(`/api/recipes/${encodeURIComponent(recipeId)}/visibility`, {
+    method: 'POST',
+    body: JSON.stringify({ visibility }),
+  })
 }
 
 export async function askAssistant(

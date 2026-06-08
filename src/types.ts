@@ -5,6 +5,10 @@ export type Ingredient = {
   amount: string
 }
 
+export type RecipeVisibility = 'official' | 'public' | 'private'
+
+export type RecipeSourceType = 'official' | 'imported' | 'user'
+
 export type RescueTip = {
   issue: string
   keywords: string[]
@@ -62,6 +66,68 @@ export type Recipe = {
     start: string
     end: string
   }
+  visibility?: RecipeVisibility
+  sourceType?: RecipeSourceType
+  ownerUserId?: string | null
+}
+
+export type PrepIngredient = {
+  name: string
+  originalAmount: string
+  scaledAmount: string
+  note?: string
+}
+
+export type MissingIngredient = {
+  name: string
+  amount: string
+}
+
+export type PrepPlan = {
+  recipeId: string
+  recipeTitle: string
+  requestedServings: number
+  baseServings: number
+  sourceType: RecipeSourceType
+  ingredients: PrepIngredient[]
+  tools: string[]
+  shoppingLinks: Array<{
+    platform: 'meituan' | 'jd' | 'taobao'
+    label: string
+    url: string
+  }>
+  note: string
+}
+
+export type AuthUser = {
+  id: string
+  identifier: string
+  displayName: string
+}
+
+export type AuthSession = {
+  user: AuthUser
+  token: string
+  isNewUser?: boolean
+}
+
+export type RecipeDraftPayload = {
+  title: string
+  subtitle?: string
+  description: string
+  scene?: string
+  difficulty?: Difficulty
+  servings: number
+  ingredients: Ingredient[]
+  tools?: string[]
+  steps: Array<{
+    title: string
+    instruction: string
+    detail?: string
+    durationMinutes?: number
+    sensoryCue?: string
+  }>
+  tags?: string[]
 }
 
 export type CookingHistoryEntry = {

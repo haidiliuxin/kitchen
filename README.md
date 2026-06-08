@@ -1,41 +1,20 @@
 # 小白下厨 Kitchen Helper
 
-面向厨房新手的全栈做饭陪练项目，提供菜谱浏览、分步跟做、AI 厨房教练、做菜历史记录、推荐菜谱，以及 Android App 封装能力。
+小白下厨是一款面向厨房新手的 AI 做饭陪练应用。项目把“选菜、备菜、跟做、求助、记录、推荐”串成一条完整链路，让用户不只是浏览菜谱，而是在厨房里一步一步把一道菜做完。
 
-这个仓库当前已经包含：
+当前仓库包含 Web 前端、Node.js 后端、SQLite 数据库、链接导入与视频转攻略能力、本地 Whisper 转写服务，以及 Capacitor Android 工程。
 
-- Web 前端
-- Node.js 后端 API
-- SQLite 本地数据库
-- DeepSeek 对话接入与降级兜底
-- Capacitor Android 工程
-- 可随包发布的离线步骤演示媒体资源
+## 核心能力
 
-## 项目目标
-
-这个项目希望解决“新手知道菜名，但不知道每一步到底做到什么程度”的问题。相比传统菜谱站，它更强调：
-
-- 一步一屏的跟做体验
-- 面向当前步骤的 AI 问答
-- 语音辅助操作和朗读
-- 历史记录与推荐闭环
-- Web 与 Android 双端可运行
-
-## 功能概览
-
-当前版本已经实现：
-
-- 菜谱列表、关键词搜索、难度与时长筛选
-- 菜谱详情查询
-- 跟做模式与步骤切换
-- 每一步的提示、补救建议、替代食材说明
-- AI 厨房教练问答接口
-- 做菜完成记录写入 SQLite
-- 基于历史记录的推荐菜谱
-- 视频链接 / 文档链接导入并生成结构化攻略
-- 浏览器端语音识别与语音朗读
-- Android 端 Capacitor 封装
-- 本地离线媒体演示资源，避免依赖外部视频站
+- 菜谱浏览、搜索、难度/时长筛选与热门菜品展示。
+- 备菜模式：选择人数后自动换算食材数量，支持标记缺少食材并跳转买菜平台搜索。
+- 跟做模式：一步一屏展示做法、计时器、状态判断、常见失误和补救建议。
+- AI 厨房教练：围绕当前菜谱和当前步骤回答“做到什么程度算好”“太咸怎么办”等问题。
+- 语音交互：支持“下一步”“上一步”“重复朗读”“计时 3 分钟”等免手触操作。
+- 视频/文章导入：粘贴 B 站、抖音等链接后，后端提取标题、正文、字幕/ASR，并生成结构化菜谱。
+- 可靠视频时间轴：优先使用平台字幕、章节或 Whisper ASR 时间戳，为每个步骤匹配可播放片段。
+- 用户体系：支持登录 token、私有菜谱、公开菜谱、官方菜谱隔离。
+- Android App：通过 Capacitor 封装，可在同 WiFi 下连接本机后端进行真机演示。
 
 ## 技术栈
 
@@ -44,19 +23,23 @@
 - React 19
 - TypeScript
 - Vite
+- Capacitor
 
 后端：
 
-- Express 5
 - Node.js
-
-数据与 AI：
-
+- Express 5
 - SQLite
-- DeepSeek Chat API
-- 本地 Whisper 转写服务（可选，用于视频链接 ASR）
+- `yt-dlp`
+- 本地 Whisper / faster-whisper 转写服务
 
-移动端：
+AI：
+
+- 蓝心大模型兼容接口
+- MiniMax / 其他兼容模型可通过环境变量切换
+- 本地规则兜底回复
+
+Android：
 
 - Capacitor Android
 - `@capacitor-community/speech-recognition`
@@ -66,45 +49,37 @@
 
 ```text
 .
-├─ src/                 前端源码
-├─ server/              后端源码
-├─ server-dist/         后端构建产物
-├─ dist/                前端构建产物
-├─ data/                SQLite 数据与种子内容
-├─ public/media/        离线步骤演示媒体资源
-├─ android/             Capacitor Android 工程
-├─ docs/                补充文档
+├─ src/                         Web 前端源码
+│  ├─ features/kitchen/          核心业务页面与状态逻辑
+│  └─ lib/                       API、助手函数
+├─ server/                      Express 后端、数据库、AI、导入器
+├─ tools/whisper-service/        本地 Whisper 转写服务
+├─ data/                        SQLite 数据库与工具缓存
+├─ public/                      静态资源
+├─ android/                     Capacitor Android 工程
+├─ docs/                        展示文档、路线图、截图资源
 └─ README.md
 ```
 
-## 核心页面与流程
+## 核心流程
 
-主要用户流程已经包含两条入口：
+### 流程 1：从菜谱到做菜
 
-### 路径 A：从已有菜谱开始
+1. 用户在首页搜索或筛选菜谱。
+2. 进入菜谱详情，查看食材、步骤、替代方案和风险点。
+3. 进入备菜页，选择几人份，系统换算食材数量。
+4. 用户确认食材是否齐全，缺少食材时可跳转买菜平台搜索。
+5. 进入跟做模式，按步骤推进。
+6. 做饭过程中可语音切换步骤、朗读步骤、启动计时或向 AI 提问。
+7. 完成后写入历史记录，并推荐下一道菜。
 
-1. 浏览菜谱并筛选出适合自己的菜
-2. 查看详情，确认材料、步骤和替代方案
-3. 进入跟做模式，一步一步推进
-4. 随时询问“这一步做到什么程度算好”等问题
-5. 通过语音或按钮切换步骤、朗读内容
-6. 完成做菜后写入历史记录
-7. 系统根据历史记录继续推荐下一道菜
+### 流程 2：从视频/文章生成做饭攻略
 
-### 路径 B：从外部内容生成攻略再开始
-
-1. 在导入页粘贴视频链接或文档链接
-2. 后端解析链接内容，必要时结合 Whisper 转写视频语音
-3. 系统生成结构化菜谱与分步攻略
-4. 用户先预览生成结果，再进入详情页
-5. 进入跟做模式，后续步骤与已有菜谱保持一致
-
-流程图可参考：
-
-- `docs/flow-1-select-to-cook.svg`
-- `docs/flow-2-voice-ai.svg`
-- `docs/flow-3-import-to-guide.svg`
-- `docs/core-interaction-flow.md`
+1. 用户粘贴 B 站、抖音或文章链接。
+2. 后端使用页面解析、`yt-dlp`、字幕抓取和 Whisper ASR 获取内容。
+3. AI 根据标题、正文、字幕、时间戳和视频元信息生成结构化菜谱。
+4. 系统尽量为每个步骤匹配真实视频片段时间。
+5. 用户保存生成结果，并像普通菜谱一样进入备菜和跟做。
 
 ## 本地开发
 
@@ -116,270 +91,184 @@ npm install
 
 ### 2. 配置环境变量
 
-先复制一份环境变量模板：
+复制模板：
 
 ```bash
 cp .env.example .env
 ```
 
-常用变量如下：
+常用配置：
 
-```bash
-DEEPSEEK_API_KEY=your_key
-DEEPSEEK_MODEL=deepseek-chat
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_TIMEOUT_MS=180000
+```env
 PORT=8787
 HOST=0.0.0.0
+AI_PROVIDER=lanxin
+LANXIN_MODEL=Doubao-Seed-2.0-mini
+VIDEO_TRANSCRIPT_WEBHOOK_URL=http://127.0.0.1:8790/transcribe
+YT_DLP_BINARY_PATH=E:\kitchen-helper\data\tools\yt-dlp.exe
+VITE_API_BASE_URL=http://你的电脑局域网IP:8787
 ```
 
-如果没有配置 DeepSeek Key，后端仍然可以启动，并回退到本地规则型回复逻辑。
+不要把真实 API Key 提交到仓库。`.env.example` 只保留占位示例。
 
-### 3. 启动开发环境
+### 3. 启动 Web + 后端
 
 ```bash
 npm run dev
 ```
 
-这个命令会同时启动：
+默认地址：
 
-- 前端开发服务器：`http://localhost:5173`
-- 后端开发服务器：`http://localhost:8787`
+- 前端：`http://localhost:5173`
+- 后端：`http://localhost:8787`
+- 健康检查：`http://localhost:8787/api/health`
 
-开发时前端通过 Vite 代理访问 `/api`。
+## Whisper 视频转写服务
 
-## 生产构建与运行
+无字幕视频要生成可靠时间轴时，需要启动本地 Whisper 服务。
 
-### 构建
-
-```bash
-npm run build
-```
-
-会生成：
-
-- 前端静态资源：`dist/`
-- 后端产物：`server-dist/`
-
-### 启动
-
-```bash
-npm run start
-```
-
-默认服务地址：
-
-- `http://localhost:8787`
-
-健康检查接口：
-
-- `GET /api/health`
-
-## 主要接口
-
-当前后端提供这些核心接口：
-
-- `GET /api/health`
-- `GET /api/recipes`
-- `GET /api/recipes/:recipeId`
-- `GET /api/history`
-- `POST /api/history`
-- `GET /api/recommendations`
-- `POST /api/assistant/reply`
-- `POST /api/imports/from-link`
-
-其中：
-
-- `/api/recipes` 支持搜索、难度和时长筛选
-- `/api/assistant/reply` 用于当前步骤的 AI 教练问答
-- `/api/imports/from-link` 用于把文章或视频链接整理成菜谱
-- `/api/imports/analyze` 用于导入后返回更适合前端展示的结果摘要
-- `/api/health` 会返回数据库路径、AI 提供方、模型和时间戳
-
-## 视频转攻略与 Whisper
-
-如果你想让 B 站、抖音这类“平台字幕不稳定”的视频也尽量提取出完整步骤，建议启动本地 Whisper 转写服务。
-
-仓库已经包含一套本地服务脚本，目录在：
-
-- `tools/whisper-service/`
-
-### 1. 安装 Whisper 服务依赖
+### 安装
 
 ```powershell
 npm run whisper:setup
 ```
 
-### 2. 启动 Whisper 服务
+### 启动
 
 ```powershell
 npm run whisper:start
 ```
 
-默认监听地址：
+默认地址：
 
 - `http://127.0.0.1:8790`
+- 健康检查：`http://127.0.0.1:8790/health`
 
-### 3. 主项目对接
+工作方式：
 
-根目录 `.env` 已支持这个配置：
+1. 主后端把视频链接发给 Whisper 服务。
+2. Whisper 服务使用 `yt-dlp` 抓取音频或媒体流。
+3. 使用 faster-whisper 转写并返回带起止时间的 ASR 片段。
+4. 主后端把 ASR 时间戳和菜谱步骤对齐，生成视频步骤片段。
+
+## Android 真机演示
+
+Android App 不内置 Node.js 后端，需要连接电脑或服务器上的后端。
+
+### 1. 获取电脑局域网 IP
+
+Windows PowerShell：
+
+```powershell
+Get-NetIPAddress -AddressFamily IPv4
+```
+
+例如电脑 IP 是 `10.130.125.11`，则 `.env` 中配置：
 
 ```env
-VIDEO_TRANSCRIPT_WEBHOOK_URL=http://127.0.0.1:8790/transcribe
+VITE_API_BASE_URL=http://10.130.125.11:8787
 ```
 
-当这个地址可用时，后端导入器会优先：
+手机和电脑必须在同一个 WiFi 下。
 
-1. 把视频链接发给本地 Whisper 服务
-2. 由 Whisper 服务用 `yt-dlp` 抓取音频
-3. 做 ASR 转写
-4. 把字幕和元信息返回给主项目
-5. 再由主项目生成结构化做饭攻略
+### 2. 启动后端
 
-这样做的好处是：
-
-- 不依赖平台是否公开字幕
-- 对 B 站、抖音视频更稳
-- Android 端以后也能直接复用这条后端能力
-
-## 数据存储
-
-SQLite 数据库文件位于：
-
-- `data/kitchen.sqlite`
-
-后端首次启动时会自动：
-
-- 创建数据库和表结构
-- 写入当前菜谱种子数据
-
-## Android 支持
-
-仓库已包含完整的 Android 工程：
-
-- Android 工程目录：`android/`
-- Capacitor 配置文件：`capacitor.config.ts`
-
-### Android 打包前配置
-
-Android 端不会直接运行 Node.js 后端，所以你需要让前端指向一个手机能访问到的 API 地址。
-
-示例：
-
-```bash
-VITE_API_BASE_URL=http://你的局域网IP:8787
+```powershell
+$env:HOST="0.0.0.0"
+$env:PORT="8787"
+npx tsx server/index.ts
 ```
 
-可参考：
+手机浏览器先测试：
 
-- `.env.android.example`
-- `.env.android`
+```text
+http://10.130.125.11:8787/api/health
+```
 
-### 同步 Android 资源
+如果打不开，通常是 Windows 防火墙拦截了 `8787` 端口。
+
+### 3. 同步并打包 APK
 
 ```bash
 npm run android:sync
 ```
 
-这个命令会：
+然后在 Android 目录执行：
 
-1. 使用 Android 环境变量重新构建前端
-2. 把构建结果同步进 Capacitor Android 工程
-
-### 打开 Android Studio
-
-```bash
-npm run android:open
+```powershell
+cd android
+.\gradlew.bat assembleDebug
 ```
 
-之后你可以在 Android Studio 中：
+Debug APK 路径：
 
-- 安装到真机或模拟器
-- 构建 Debug APK
-- 生成 Signed APK / AAB
+```text
+android/app/build/outputs/apk/debug/app-debug.apk
+```
 
-### 当前 Android 侧已处理的兼容项
+## 主要接口
 
-- Android Gradle Plugin 版本兼容问题已调整
-- Gradle Wrapper 下载缓存问题可手动处理
-- 允许本地开发阶段通过 HTTP 访问局域网后端
-- 已加入录音权限与基础语音插件支持
+- `GET /api/health`：健康检查，返回数据库、AI、语音配置。
+- `POST /api/auth/login`：注册或登录，返回 token。
+- `GET /api/auth/me`：获取当前用户。
+- `GET /api/recipes`：菜谱列表，支持搜索和筛选。
+- `GET /api/recipes/:recipeId`：菜谱详情。
+- `POST /api/recipes`：用户创建菜谱。
+- `POST /api/recipes/:recipeId/visibility`：公开/私有切换。
+- `POST /api/recipes/:recipeId/prep-plan`：按人数生成备菜计划。
+- `POST /api/imports/from-link`：从链接导入并生成菜谱。
+- `POST /api/imports/analyze`：导入链接并返回前端摘要。
+- `POST /api/assistant/reply`：AI 厨房教练问答。
+- `POST /api/voice/interpret`：语音文本解析。
+- `GET /api/media/proxy`：代理平台视频流，提升 Android WebView 播放稳定性。
+- `GET /api/history` / `POST /api/history`：做菜历史记录。
 
-## 离线媒体资源
+## 数据说明
 
-为了避免外部视频站点在移动端被拦截或加载失败，项目已经把步骤演示升级为仓库内置的离线媒体资源。
+SQLite 数据库：
 
-当前资源目录：
+```text
+data/kitchen.sqlite
+```
 
-- `public/media/`
+当前数据库包含：
 
-这意味着：
+- 官方菜谱
+- 用户菜谱
+- 导入菜谱
+- 食材、步骤、视频时间轴、历史记录
+- 用户、登录 token、公开/私有权限字段
 
-- Web 端可以直接加载随项目发布的媒体
-- Android 打包后也会把媒体一起带入安装包
-- 不再依赖第三方视频页面跳转
+## 当前已知限制
 
-## 语音能力说明
-
-项目目前包含两类语音能力：
-
-- 语音识别：用于说“下一步”“重复一遍”或直接提问
-- 语音朗读：用于朗读当前步骤与 AI 提示
-
-当前状态：
-
-- Web 端语音识别与朗读已接入
-- Android 端已接入 Capacitor 插件
-- 不同手机厂商对系统语音服务的支持差异较大，部分设备仍可能出现识别服务不可用
-
-如果 Android 真机语音识别失败，通常优先检查：
-
-- 系统是否启用了语音输入服务
-- 麦克风权限是否已授予
-- Google 语音服务或厂商语音服务是否可用
-
-## 已知优点
-
-- 目标用户明确，场景聚焦
-- 具备真实后端、数据库和 AI 闭环，不是纯静态原型
-- Web 和 Android 两端共享主业务逻辑，迭代成本较低
-- 已考虑外网不稳定场景，加入离线媒体和 AI 降级策略
-
-## 当前限制
-
-- 用户体系、多端同步、登录鉴权尚未实现
-- Android 语音识别稳定性依赖系统服务
-- 离线媒体资源目前更偏演示型，还不是完整真人教学素材库
-- AI 厨房教练仍以步骤问答为主，缺少更强的状态感知
-- 尚未做正式发布前的安全、日志和监控体系
-
-## 推荐的下一步方向
-
-- 补充用户登录、收藏、成长记录和多用户隔离
-- 引入更完整的菜谱 CMS 或内容管理后台
-- 扩展离线媒体资源，建立每道菜多步骤素材库
-- 增强 Android 原生能力，提升语音与多媒体稳定性
-- 引入图片识别，支持“我现在炒到这个样子对不对”
-- 增加部署文档、CI/CD 与更完整的发布流程
+- Android 语音识别依赖系统语音服务，不同手机厂商表现可能不同。
+- B 站和抖音视频直链可能过期，演示时建议保持后端在线并重新导入关键视频。
+- 无字幕视频需要 Whisper，生成时间会更长。
+- 当前买菜平台只做到跳转搜索，不会自动下单。
+- 目前更适合比赛展示和原型验证，正式商用仍需要权限、安全、日志、监控和云端部署。
 
 ## 常用命令
 
 ```bash
 npm run dev
 npm run build
-npm run start
+npm run build:client:android
+npm run build:server
 npm run android:sync
 npm run android:open
+npm run whisper:start
 npm run lint
 ```
 
-## 文档
+## 展示资源
 
-可进一步参考：
+`docs/` 目录中包含：
 
-- `docs/core-interaction-flow.md`
-- `docs/android-release-guide.md`
+- 技术路线图
+- 现有成果图
+- PPT 手机截图资源
+- 项目流程与展示文档
 
 ## License
 
-当前仓库未单独声明开源许可证。如需公开发布，建议补充明确的 License 文件。
+当前仓库暂未声明开源许可证。如需公开发布或多人协作，建议补充明确的 License 文件。

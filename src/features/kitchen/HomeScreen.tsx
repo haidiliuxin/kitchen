@@ -23,7 +23,7 @@ type HomeScreenProps = {
     recipeId?: string | null
     token: number
   }
-  onStartCooking: () => void
+  onStartCooking: (recipeId?: string) => void
   onResumeCooking: (recipeId: string, stepIndex: number) => void
   onToggleFavorite: (recipeId: string) => void
   onRetry: () => void
@@ -541,8 +541,12 @@ export function HomeScreen(props: HomeScreenProps) {
             >
               {props.favoriteRecipeIds.includes(props.selectedRecipe.id) ? '已收藏' : '收藏这道菜'}
             </button>
-            <button className="primary-button recipe-detail-cta" onClick={props.onStartCooking}>
-              进入跟做模式
+            <button
+              className="primary-button recipe-detail-cta"
+              onClick={() => props.onStartCooking(props.selectedRecipe!.id)}
+              disabled={props.selectedRecipe.steps.length === 0}
+            >
+              先备菜再跟做
             </button>
           </div>
         </div>

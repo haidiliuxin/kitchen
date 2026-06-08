@@ -2,5 +2,13 @@ declare module 'youtube-transcript/dist/youtube-transcript.esm.js' {
   export function fetchTranscript(
     videoId: string,
     config?: { lang?: string },
-  ): Promise<Array<{ text: string; lang?: string }>>
+  ): Promise<
+    Array<{
+      text: string
+      lang?: string
+      offset?: number
+      duration?: number
+      start?: number
+    }>
+  >
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { formatTimer, speak } from './shared.js'
 import type { Recipe, Step } from '../../types.js'
 import type { ChatMessage, VoiceStatus } from './shared.js'
+import { buildMediaProxyUrl } from '../../lib/api.js'
 
 type CookScreenProps = {
   selectedRecipe: Recipe
@@ -141,6 +142,19 @@ function resolveStepMedia(mediaUrl: string, segment?: StepVideoSegment): StepMed
   return { kind: 'external', url: trimmedUrl }
 }
 
+function shouldProxyVideoUrl(url: string): boolean {
+  const lowerUrl = url.toLowerCase()
+  return (
+    lowerUrl.includes('bilivideo.com') ||
+    lowerUrl.includes('mcdn.bilivideo.cn') ||
+    lowerUrl.includes('douyinvod.com') ||
+    lowerUrl.includes('bytecdn.cn') ||
+    lowerUrl.includes('byteimg.com') ||
+    lowerUrl.includes('upos') ||
+    lowerUrl.includes('mime_type=video_mp4')
+  )
+}
+
 function getStepVideoSegment(recipe: Recipe, stepIndex: number): StepVideoSegment | undefined {
   const currentVideo = recipe.steps[stepIndex]?.video
   const explicitStart =
@@ -193,6 +207,13 @@ export function CookScreen({
   const mediaUrl = currentStep.video?.url ?? ''
   const stepVideoSegment = getStepVideoSegment(selectedRecipe, currentStepIndex)
   const stepMedia = resolveStepMedia(mediaUrl, stepVideoSegment)
+  const playableStepMedia =
+    stepMedia.kind === 'video' && shouldProxyVideoUrl(stepMedia.url)
+      ? {
+          ...stepMedia,
+          url: buildMediaProxyUrl(stepMedia.url, currentStep.video?.creditUrl ?? selectedRecipe.steps[0]?.video?.creditUrl),
+        }
+      : stepMedia
 
   useEffect(() => {
     setOfflineFrameIndex(0)
@@ -205,7 +226,7 @@ export function CookScreen({
 
   useEffect(() => {
     const video = videoRef.current
-    if (!video || stepMedia.kind !== 'video') {
+    if (!video || playableStepMedia.kind !== 'video') {
       return
     }
 
@@ -224,7 +245,7 @@ export function CookScreen({
     return () => {
       video.removeEventListener('loadedmetadata', seekToStepStart)
     }
-  }, [stepMedia.kind, stepMedia.kind === 'video' ? stepMedia.url : '', stepVideoSegment?.startSeconds])
+  }, [playableStepMedia.kind, playableStepMedia.kind === 'video' ? playableStepMedia.url : '', stepVideoSegment?.startSeconds])
 
   const stopAtStepEnd = (video: HTMLVideoElement) => {
     if (!stepVideoSegment) {
@@ -338,23 +359,23 @@ export function CookScreen({
               <div className="step-video-head">
                 <div>
                   <span className="section-kicker">
-                    {stepMedia.kind === 'image' ? '本地离线演示' : '教学视频'}
+                    {playableStepMedia.kind === 'image' ? '本地离线演示' : '教学视频'}
                   </span>
-                  <h3>{stepMedia.kind === 'external' ? '打开原视频对照跟做' : '边看边做'}</h3>
+                  <h3>{playableStepMedia.kind === 'external' ? '打开原视频对照跟做' : '边看边做'}</h3>
                 </div>
               </div>
-              {stepMedia.kind === 'image' ? (
+              {playableStepMedia.kind === 'image' ? (
                 <img
                   className="step-video-player step-media-image"
-                  src={stepMedia.url}
+                  src={playableStepMedia.url}
                   alt={`${currentStep.title} 离线动作演示`}
                 />
-              ) : stepMedia.kind === 'video' ? (
+              ) : playableStepMedia.kind === 'video' ? (
                 <video
                   ref={videoRef}
-                  key={`${stepMedia.url}-${stepVideoSegment?.startSeconds ?? 'full'}-${stepVideoSegment?.endSeconds ?? 'full'}`}
+                  key={`${playableStepMedia.url}-${stepVideoSegment?.startSeconds ?? 'full'}-${stepVideoSegment?.endSeconds ?? 'full'}`}
                   className="step-video-player"
-                  src={stepMedia.url}
+                  src={playableStepMedia.url}
                   poster={currentStep.video.posterUrl}
                   controls
                   playsInline
@@ -368,22 +389,22 @@ export function CookScreen({
                 >
                   当前浏览器不支持直接播放这个视频，请打开原视频链接查看。
                 </video>
-              ) : stepMedia.kind === 'embed' ? (
+              ) : playableStepMedia.kind === 'embed' ? (
                 <iframe
                   className="step-video-player step-video-frame"
-                  src={stepMedia.url}
+                  src={playableStepMedia.url}
                   title={`${currentStep.title} 教学视频`}
                   allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                   allowFullScreen
                 />
-              ) : stepMedia.kind === 'external' ? (
+              ) : playableStepMedia.kind === 'external' ? (
                 <div className="offline-video-player" role="group" aria-label={`${currentStep.title} 教学视频入口`}>
                   <div className="offline-video-stage video-open-stage">
                     <span className="offline-video-badge">原视频</span>
                     <strong>这个平台不允许页面内嵌播放</strong>
                     <p>你可以点下面的按钮打开原视频，对照当前步骤边看边做。</p>
                   </div>
-                  <a className="primary-button video-open-link" href={stepMedia.url} target="_blank" rel="noreferrer">
+                  <a className="primary-button video-open-link" href={playableStepMedia.url} target="_blank" rel="noreferrer">
                     打开教学视频
                   </a>
                 </div>
@@ -406,12 +427,12 @@ export function CookScreen({
                   </div>
                 </div>
               )}
-              {stepMedia.kind !== 'image' && stepVideoSegment && (
+              {playableStepMedia.kind !== 'image' && stepVideoSegment && (
                 <p className="step-video-segment">
                   当前步骤片段：{formatTimer(stepVideoSegment.startSeconds)} - {formatTimer(stepVideoSegment.endSeconds)}
                 </p>
               )}
-              {stepMedia.kind !== 'image' && !stepVideoSegment && (
+              {playableStepMedia.kind !== 'image' && !stepVideoSegment && (
                 <p className="step-video-segment">
                   暂无可靠时间轴：先播放完整原视频，对照当前步骤看关键动作。
                 </p>

@@ -37,8 +37,15 @@ class TranscribeRequest(BaseModel):
     content: str | None = Field(default=None)
 
 
+class TranscriptSegment(BaseModel):
+    startSeconds: float
+    endSeconds: float
+    text: str
+
+
 class TranscribeResponse(BaseModel):
     transcript: str
+    segments: list[TranscriptSegment] = Field(default_factory=list)
     language: str | None = None
     notes: list[str]
     title: str | None = None
@@ -142,6 +149,10 @@ def fetch_video_metadata(url: str) -> dict[str, Any]:
             "zh-Hans,zh-CN,zh.*,en.*",
             "--user-agent",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0 Safari/537.36",
+            "--referer",
+            "https://www.bilibili.com/" if "bilibili.com" in url else url,
+            "--add-header",
+            "Accept-Language:zh-CN,zh;q=0.9,en;q=0.8",
         ]
     )
     return json.loads(output)
@@ -191,6 +202,10 @@ def download_audio_track(url: str, workdir: Path) -> Path:
             "--dump-single-json",
             "--user-agent",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0 Safari/537.36",
+            "--referer",
+            "https://www.bilibili.com/" if "bilibili.com" in url else url,
+            "--add-header",
+            "Accept-Language:zh-CN,zh;q=0.9,en;q=0.8",
         ],
     )
     metadata = json.loads(output)
@@ -206,12 +221,14 @@ def download_audio_track(url: str, workdir: Path) -> Path:
     return target_path
 
 
-def download_direct_media(media_url: str, workdir: Path) -> Path:
+def download_direct_media(media_url: str, workdir: Path, referer: str = "") -> Path:
     target_path = workdir / "rendered-media.mp4"
     request = urllib.request.Request(
         media_url,
         headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0 Safari/537.36",
+            "Referer": referer or media_url,
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         },
     )
     with urllib.request.urlopen(request) as response, open(target_path, "wb") as file:
@@ -252,7 +269,32 @@ def build_metadata_content(metadata: dict[str, Any]) -> str:
     return "\n".join(item for item in lines if item).strip()
 
 
-def transcribe_audio_file(audio_path: Path) -> tuple[str, str | None]:
+def normalize_whisper_segments(segments: list[Any]) -> list[TranscriptSegment]:
+    normalized: list[TranscriptSegment] = []
+    for segment in segments:
+        text = str(getattr(segment, "text", "") or "").strip()
+        start = getattr(segment, "start", None)
+        end = getattr(segment, "end", None)
+        if (
+            not text
+            or not isinstance(start, (int, float))
+            or not isinstance(end, (int, float))
+            or end <= start
+        ):
+            continue
+
+        normalized.append(
+            TranscriptSegment(
+                startSeconds=max(0.0, float(start)),
+                endSeconds=max(0.0, float(end)),
+                text=" ".join(text.split()),
+            )
+        )
+
+    return normalized
+
+
+def transcribe_audio_file(audio_path: Path) -> tuple[str, str | None, list[TranscriptSegment]]:
     beam_size = int(get_env("WHISPER_BEAM_SIZE", "5"))
     model = get_whisper_model()
 
@@ -264,6 +306,7 @@ def transcribe_audio_file(audio_path: Path) -> tuple[str, str | None]:
 
     best_transcript = ""
     best_language = None
+    best_segments: list[TranscriptSegment] = []
 
     for config in pass_configs:
         segments, info = model.transcribe(
@@ -275,16 +318,19 @@ def transcribe_audio_file(audio_path: Path) -> tuple[str, str | None]:
             language=config["language"],
         )
 
-        transcript = " ".join(segment.text.strip() for segment in segments if segment.text.strip())
+        segment_list = list(segments)
+        transcript_segments = normalize_whisper_segments(segment_list)
+        transcript = " ".join(segment.text for segment in transcript_segments if segment.text)
         transcript = " ".join(transcript.split()).strip()
         if len(transcript) > len(best_transcript):
             best_transcript = transcript
             best_language = getattr(info, "language", None)
+            best_segments = transcript_segments
 
         if transcript and not is_low_quality_transcript(transcript):
-            return transcript, getattr(info, "language", None)
+            return transcript, getattr(info, "language", None), transcript_segments
 
-    return best_transcript, best_language
+    return best_transcript, best_language, best_segments
 
 
 def extract_audio_for_whisper(media_path: Path, workdir: Path) -> Path:
@@ -382,16 +428,17 @@ def transcribe(request: TranscribeRequest):
 
     try:
         media_path = (
-            download_direct_media(request.mediaUrl.strip(), temp_root)
+            download_direct_media(request.mediaUrl.strip(), temp_root, request.url.strip())
             if request.mediaUrl and request.mediaUrl.strip()
             else download_audio_track(request.url.strip(), temp_root)
         )
         audio_path = extract_audio_for_whisper(media_path, temp_root)
-        transcript, language = transcribe_audio_file(audio_path)
+        transcript, language, segments = transcribe_audio_file(audio_path)
         fallback_text = build_transcript_fallback_text(request)
         if not transcript or is_low_quality_transcript(transcript, language, fallback_text):
             if fallback_text:
                 transcript = fallback_text
+                segments = []
                 language = language or "zh"
                 notes.append("音频转写结果为空或质量较差，已回退到页面标题/文案兜底。")
 
@@ -399,10 +446,13 @@ def transcribe(request: TranscribeRequest):
             raise HTTPException(status_code=500, detail="Whisper returned an empty transcript.")
 
         notes.append("已优先使用音频 ASR，而不是只依赖平台字幕。")
+        if segments:
+            notes.append("Whisper 返回了带起止时间的 ASR 片段，可用于可靠步骤片段定位。")
         if request.mediaUrl and request.mediaUrl.strip():
             notes.append("已使用浏览器渲染得到的视频直链作为转写输入。")
         return TranscribeResponse(
             transcript=transcript[:16000],
+            segments=segments[:2000],
             language=language,
             notes=notes,
             title=request.title or str(metadata.get("title", "")).strip() or None,

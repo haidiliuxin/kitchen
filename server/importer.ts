@@ -1,14 +1,13 @@
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { Recipe, Step } from '../src/types.js'
+import { callChatCompletion, getLlmRuntimeInfo, isLlmConfigured, type LlmProvider } from './llm.js'
 
-const deepseekBaseUrl = (process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com').replace(
-  /\/$/,
-  '',
+const requestTimeoutMs = Number(
+  process.env.LANXIN_TIMEOUT_MS ?? process.env.DEEPSEEK_TIMEOUT_MS ?? 180000,
 )
-const deepseekModel = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat'
-const requestTimeoutMs = Number(process.env.DEEPSEEK_TIMEOUT_MS ?? 180000)
 const importFetchTimeoutMs = Number(process.env.IMPORT_FETCH_TIMEOUT_MS ?? 15000)
 const externalTranscriptWebhookUrl = process.env.VIDEO_TRANSCRIPT_WEBHOOK_URL?.trim() ?? ''
 const ytDlpBinaryPath = process.env.YT_DLP_BINARY_PATH?.trim()
@@ -27,9 +26,23 @@ type FetchableSource = {
   sourceType: 'article' | 'video' | 'unknown'
   provider?: 'youtube' | 'bilibili' | 'douyin' | 'generic'
   transcript: string
+  transcriptSegments: TimedTextSegment[]
+  timelineChapters: TimelineChapter[]
   transcriptLanguage?: string
   extractionNotes: string[]
   mediaSignals: string[]
+}
+
+type TimedTextSegment = {
+  startSeconds: number
+  endSeconds: number
+  text: string
+}
+
+type TimelineChapter = {
+  title: string
+  startSeconds: number
+  endSeconds?: number
 }
 
 type RenderedVideoExtraction = {
@@ -39,14 +52,6 @@ type RenderedVideoExtraction = {
   content?: string
   mediaUrl?: string
   extractionNotes: string[]
-}
-
-type DeepSeekResponse = {
-  choices?: Array<{
-    message?: {
-      content?: string
-    }
-  }>
 }
 
 type CaptionTrack = {
@@ -104,6 +109,8 @@ type RecipeEvidence = {
     detail: string
     sensoryCue: string
     durationMinutes: number
+    startSeconds?: number
+    endSeconds?: number
   }>
   criticalTips: string[]
   commonMistakes: string[]
@@ -117,7 +124,18 @@ type RecipeEvidence = {
 
 let ytDlpWrapPromise: Promise<any | null> | null = null
 let youtubeTranscriptPromise: Promise<
-  ((videoId: string, config?: { lang?: string }) => Promise<Array<{ text: string; lang?: string }>>) | null
+  ((
+    videoId: string,
+    config?: { lang?: string },
+  ) => Promise<
+    Array<{
+      text: string
+      lang?: string
+      offset?: number
+      duration?: number
+      start?: number
+    }>
+  >) | null
 > | null = null
 let playwrightChromiumPromise: Promise<any | null> | null = null
 
@@ -236,6 +254,104 @@ function formatMinutes(totalSeconds: number | undefined): string {
   }
 
   return seconds > 0 ? `${minutes} 分 ${seconds} 秒` : `${minutes} 分钟`
+}
+
+function formatTimestamp(totalSeconds: number | undefined): string {
+  if (typeof totalSeconds !== 'number' || !Number.isFinite(totalSeconds) || totalSeconds < 0) {
+    return '00:00'
+  }
+
+  const rounded = Math.round(totalSeconds)
+  const hours = Math.floor(rounded / 3600)
+  const minutes = Math.floor((rounded % 3600) / 60)
+  const seconds = rounded % 60
+  const pad = (value: number) => value.toString().padStart(2, '0')
+
+  return hours > 0
+    ? `${hours}:${pad(minutes)}:${pad(seconds)}`
+    : `${pad(minutes)}:${pad(seconds)}`
+}
+
+function isVagueAmount(value: string): boolean {
+  return !value.trim() || /(适量|少许|若干|若干个|若干克|按需|随意|看情况|酌情)/.test(value)
+}
+
+function inferConcreteIngredientAmount(name: string, fallback = '约 100 克'): string {
+  const normalized = name.replace(/\s+/g, '')
+  const rules: Array<{ pattern: RegExp; amount: string }> = [
+    { pattern: /(西瓜|冬瓜|南瓜|土豆|茄子|萝卜|莲藕|花菜|包菜|白菜|青菜|豆角|菌菇|蘑菇|黄瓜|青椒|彩椒)/, amount: '约 300 克' },
+    { pattern: /(猪肉|牛肉|羊肉|鸡肉|鸡胸|鸡腿|排骨|大肠|肥肠|鱼|虾|肉片|肉丝)/, amount: '约 250 克' },
+    { pattern: /(鸡蛋|鸭蛋)/, amount: '2 个' },
+    { pattern: /(番茄|西红柿)/, amount: '2 个（约 300 克）' },
+    { pattern: /(葱|小葱|香葱)/, amount: '2 根' },
+    { pattern: /姜/, amount: '约 10 克' },
+    { pattern: /蒜/, amount: '3 瓣' },
+    { pattern: /(辣椒|小米辣|干辣椒)/, amount: '2 个' },
+    { pattern: /(盐)/, amount: '约 2 克' },
+    { pattern: /(糖|白糖)/, amount: '约 5 克' },
+    { pattern: /(生抽|酱油|料酒|醋|蚝油)/, amount: '1 汤勺（约 15 毫升）' },
+    { pattern: /(老抽)/, amount: '1 小勺（约 5 毫升）' },
+    { pattern: /(食用油|油)/, amount: '约 20 毫升' },
+    { pattern: /(淀粉)/, amount: '约 10 克' },
+    { pattern: /(水|清水|高汤)/, amount: '约 100 毫升' },
+  ]
+
+  return rules.find((rule) => rule.pattern.test(normalized))?.amount ?? fallback
+}
+
+function normalizeIngredientAmount(name: string, amount: string): string {
+  const cleaned = amount.replace(/\s+/g, ' ').trim()
+  if (!isVagueAmount(cleaned)) {
+    return cleaned
+  }
+
+  return inferConcreteIngredientAmount(name)
+}
+
+function formatTimedRange(startSeconds: number, endSeconds?: number): string {
+  return `${formatTimestamp(startSeconds)}-${formatTimestamp(endSeconds ?? startSeconds)}`
+}
+
+function buildTimestampedTranscriptBlock(
+  segments: TimedTextSegment[],
+  maxSegments = 180,
+): string {
+  if (segments.length === 0) {
+    return '无可用字幕时间戳'
+  }
+
+  const merged: TimedTextSegment[] = []
+  for (const segment of segments) {
+    const last = merged[merged.length - 1]
+    if (last && segment.startSeconds - last.endSeconds <= 1.2 && last.text.length < 90) {
+      last.endSeconds = Math.max(last.endSeconds, segment.endSeconds)
+      last.text = `${last.text} ${segment.text}`.replace(/\s+/g, ' ').trim()
+      continue
+    }
+
+    merged.push({ ...segment })
+  }
+
+  return merged
+    .slice(0, maxSegments)
+    .map((segment, index) => {
+      const text = segment.text.length > 120 ? `${segment.text.slice(0, 120)}...` : segment.text
+      return `${index + 1}. [${formatTimedRange(segment.startSeconds, segment.endSeconds)}] ${text}`
+    })
+    .join('\n')
+}
+
+function buildChapterTimelineBlock(chapters: TimelineChapter[]): string {
+  if (chapters.length === 0) {
+    return '无可用视频章节'
+  }
+
+  return chapters
+    .map((chapter, index) => {
+      const range = formatTimedRange(chapter.startSeconds, chapter.endSeconds)
+      return `${index + 1}. [${range}] ${chapter.title}`
+    })
+    .join('\n')
 }
 
 function safeJsonParse<T>(raw: string): T | null {
@@ -530,7 +646,18 @@ function pickYtDlpMediaUrl(info: YtDlpVideoInfo): string | undefined {
 }
 
 async function getYoutubeTranscriptFetcher(): Promise<
-  ((videoId: string, config?: { lang?: string }) => Promise<Array<{ text: string; lang?: string }>>) | null
+  ((
+    videoId: string,
+    config?: { lang?: string },
+  ) => Promise<
+    Array<{
+      text: string
+      lang?: string
+      offset?: number
+      duration?: number
+      start?: number
+    }>
+  >) | null
 > {
   if (youtubeTranscriptPromise) {
     return youtubeTranscriptPromise
@@ -541,7 +668,18 @@ async function getYoutubeTranscriptFetcher(): Promise<
       const module = await import('youtube-transcript/dist/youtube-transcript.esm.js')
       const fetcher = (module.fetchTranscript ??
         (module.default as { fetchTranscript?: unknown } | undefined)?.fetchTranscript) as
-        | ((videoId: string, config?: { lang?: string }) => Promise<Array<{ text: string; lang?: string }>>)
+        | ((
+            videoId: string,
+            config?: { lang?: string },
+          ) => Promise<
+            Array<{
+              text: string
+              lang?: string
+              offset?: number
+              duration?: number
+              start?: number
+            }>
+          >)
         | undefined
 
       return fetcher ?? null
@@ -807,26 +945,134 @@ async function extractRenderedVideoPage(
   }
 }
 
-function parseXmlLikeSubtitles(raw: string): string {
+function parseTimeExpression(value: string | undefined): number | null {
+  if (!value) {
+    return null
+  }
+
+  const normalized = value.trim().replace(',', '.')
+  const colonParts = normalized.split(':')
+  if (colonParts.length >= 2) {
+    const seconds = Number(colonParts.pop())
+    const minutes = Number(colonParts.pop())
+    const hours = colonParts.length > 0 ? Number(colonParts.pop()) : 0
+    if ([seconds, minutes, hours].every((part) => Number.isFinite(part))) {
+      return hours * 3600 + minutes * 60 + seconds
+    }
+  }
+
+  const numeric = Number(normalized.replace(/s$/i, ''))
+  return Number.isFinite(numeric) ? numeric : null
+}
+
+function toSubtitleParseResult(segments: TimedTextSegment[], fallbackText = ''): {
+  text: string
+  segments: TimedTextSegment[]
+} {
+  const cleanSegments = segments
+    .map((segment) => ({
+      startSeconds: Math.max(0, segment.startSeconds),
+      endSeconds: Math.max(0, segment.endSeconds),
+      text: stripHtml(segment.text).replace(/\s+/g, ' ').trim(),
+    }))
+    .filter(
+      (segment) =>
+        segment.text &&
+        segment.endSeconds > segment.startSeconds &&
+        !isLikelyNoisyTranscriptLine(segment.text),
+    )
+
+  return {
+    text: cleanSegments.map((segment) => segment.text).join(' ').trim() || fallbackText,
+    segments: cleanSegments,
+  }
+}
+
+function parseXmlLikeSubtitles(raw: string): { text: string; segments: TimedTextSegment[] } {
+  const textSegments = [...raw.matchAll(/<text([^>]*)>([\s\S]*?)<\/text>/gi)].reduce<
+    TimedTextSegment[]
+  >((next, match) => {
+    const attrs = match[1] ?? ''
+    const start = parseTimeExpression(attrs.match(/\bstart=["']([^"']+)["']/i)?.[1])
+    const duration = parseTimeExpression(attrs.match(/\bdur=["']([^"']+)["']/i)?.[1])
+    const end = start !== null && duration !== null ? start + duration : null
+    if (start !== null && end !== null) {
+      next.push({ startSeconds: start, endSeconds: end, text: match[2] ?? '' })
+    }
+    return next
+  }, [])
+  if (textSegments.length > 0) {
+    return toSubtitleParseResult(textSegments)
+  }
+
   const textMatches = [...raw.matchAll(/<text[^>]*>([\s\S]*?)<\/text>/gi)].map((match) =>
     stripHtml(match[1]),
   )
   if (textMatches.length > 0) {
-    return textMatches.join(' ')
+    return { text: textMatches.join(' '), segments: [] }
+  }
+
+  const paragraphSegments = [...raw.matchAll(/<p([^>]*)>([\s\S]*?)<\/p>/gi)].reduce<
+    TimedTextSegment[]
+  >((next, match) => {
+    const attrs = match[1] ?? ''
+    const start =
+      parseTimeExpression(attrs.match(/\bbegin=["']([^"']+)["']/i)?.[1]) ??
+      parseTimeExpression(attrs.match(/\bstart=["']([^"']+)["']/i)?.[1])
+    const explicitEnd = parseTimeExpression(attrs.match(/\bend=["']([^"']+)["']/i)?.[1])
+    const duration = parseTimeExpression(attrs.match(/\bdur=["']([^"']+)["']/i)?.[1])
+    const end = explicitEnd ?? (start !== null && duration !== null ? start + duration : null)
+    if (start !== null && end !== null) {
+      next.push({ startSeconds: start, endSeconds: end, text: match[2] ?? '' })
+    }
+    return next
+  }, [])
+  if (paragraphSegments.length > 0) {
+    return toSubtitleParseResult(paragraphSegments)
   }
 
   const paragraphMatches = [...raw.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)].map((match) =>
     stripHtml(match[1]),
   )
   if (paragraphMatches.length > 0) {
-    return paragraphMatches.join(' ')
+    return { text: paragraphMatches.join(' '), segments: [] }
   }
 
-  return stripHtml(raw)
+  return { text: stripHtml(raw), segments: [] }
 }
 
-function parseVttSubtitles(raw: string): string {
-  return raw
+function parseVttSubtitles(raw: string): { text: string; segments: TimedTextSegment[] } {
+  const lines = raw.replace(/\r/g, '').split('\n')
+  const segments: TimedTextSegment[] = []
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]?.trim() ?? ''
+    const timeMatch = line.match(
+      /(?<start>\d{1,2}:\d{2}(?::\d{2})?[\.,]\d{3})\s*-->\s*(?<end>\d{1,2}:\d{2}(?::\d{2})?[\.,]\d{3})/,
+    )
+    if (!timeMatch?.groups) {
+      continue
+    }
+
+    const start = parseTimeExpression(timeMatch.groups.start)
+    const end = parseTimeExpression(timeMatch.groups.end)
+    const textLines: string[] = []
+    index += 1
+    while (index < lines.length && lines[index]?.trim()) {
+      textLines.push(lines[index] ?? '')
+      index += 1
+    }
+
+    if (start !== null && end !== null) {
+      segments.push({ startSeconds: start, endSeconds: end, text: textLines.join(' ') })
+    }
+  }
+
+  if (segments.length > 0) {
+    return toSubtitleParseResult(segments)
+  }
+
+  const text = raw
     .split('\n')
     .map((line) => line.trim())
     .filter(
@@ -840,47 +1086,124 @@ function parseVttSubtitles(raw: string): string {
     .join(' ')
     .replace(/\s+/g, ' ')
     .trim()
+  return { text, segments: [] }
 }
 
-function parseJsonSubtitles(raw: string): string {
+function parseJsonSubtitles(raw: string): { text: string; segments: TimedTextSegment[] } {
   try {
     const payload = JSON.parse(raw) as
-      | { events?: Array<{ segs?: Array<{ utf8?: string }> }> }
-      | Array<{ text?: string }>
+      | { events?: Array<{ tStartMs?: number; dDurationMs?: number; segs?: Array<{ utf8?: string }> }> }
+      | Array<{ text?: string; start?: number; duration?: number }>
 
     if (Array.isArray(payload)) {
-      return payload
+      const segments = payload.reduce<TimedTextSegment[]>((next, item, index, array) => {
+        const text = typeof item.text === 'string' ? item.text : ''
+        const start =
+          typeof item.start === 'number' && Number.isFinite(item.start) ? item.start : null
+        const duration =
+          typeof item.duration === 'number' && Number.isFinite(item.duration)
+            ? item.duration
+            : null
+        const nextStart =
+          typeof array[index + 1]?.start === 'number' && Number.isFinite(array[index + 1]?.start)
+            ? array[index + 1]?.start
+            : null
+        const end = start !== null ? start + (duration ?? Math.max(1.5, (nextStart ?? start + 4) - start)) : null
+        if (start !== null && end !== null) {
+          next.push({ startSeconds: start, endSeconds: end, text })
+        }
+        return next
+      }, [])
+      if (segments.length > 0) {
+        return toSubtitleParseResult(segments)
+      }
+
+      const text = payload
         .map((item) => (typeof item.text === 'string' ? item.text : ''))
         .filter(Boolean)
         .join(' ')
         .replace(/\s+/g, ' ')
         .trim()
+      return { text, segments: [] }
     }
 
-    return (payload.events ?? [])
-      .flatMap((event) => event.segs ?? [])
-      .map((segment) => segment.utf8 ?? '')
-      .filter(Boolean)
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim()
+    const segments = (payload.events ?? []).reduce<TimedTextSegment[]>((next, event) => {
+      const text = (event.segs ?? [])
+        .map((segment) => segment.utf8 ?? '')
+        .join('')
+        .trim()
+      if (
+        text &&
+        typeof event.tStartMs === 'number' &&
+        Number.isFinite(event.tStartMs)
+      ) {
+        const start = event.tStartMs / 1000
+        const duration =
+          typeof event.dDurationMs === 'number' && Number.isFinite(event.dDurationMs)
+            ? event.dDurationMs / 1000
+            : 3
+        next.push({ startSeconds: start, endSeconds: start + Math.max(duration, 0.6), text })
+      }
+      return next
+    }, [])
+
+    if (segments.length > 0) {
+      return toSubtitleParseResult(segments)
+    }
+
+    const text = (payload.events ?? [])
+        .flatMap((event) => event.segs ?? [])
+        .map((segment) => segment.utf8 ?? '')
+        .filter(Boolean)
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+    return { text, segments: [] }
   } catch {
-    return ''
+    return { text: '', segments: [] }
   }
 }
 
-async function fetchSubtitleTrackText(track: CaptionTrack): Promise<string> {
+async function fetchSubtitleTrackText(track: CaptionTrack): Promise<{
+  text: string
+  segments: TimedTextSegment[]
+}> {
   if (!track.url) {
-    return ''
+    return { text: '', segments: [] }
   }
 
-  const response = await fetch(track.url)
-  if (!response.ok) {
-    return ''
-  }
+  try {
+    const response = await fetch(track.url)
+    if (!response.ok) {
+      return { text: '', segments: [] }
+    }
 
-  const raw = await response.text()
-  const extension = (track.ext ?? '').toLowerCase()
+    const raw = await response.text()
+    const extension = (track.ext ?? '').toLowerCase()
+
+    if (extension === 'json3' || extension === 'json') {
+      return parseJsonSubtitles(raw)
+    }
+
+    if (extension === 'vtt') {
+      return parseVttSubtitles(raw)
+    }
+
+    if (extension === 'ttml' || extension === 'srv3' || extension === 'xml') {
+      return parseXmlLikeSubtitles(raw)
+    }
+
+    return { text: stripHtml(raw), segments: [] }
+  } catch {
+    return { text: '', segments: [] }
+  }
+}
+
+function parseSubtitleTextByExtension(fileName: string, raw: string): {
+  text: string
+  segments: TimedTextSegment[]
+} {
+  const extension = path.extname(fileName).replace(/^\./, '').toLowerCase()
 
   if (extension === 'json3' || extension === 'json') {
     return parseJsonSubtitles(raw)
@@ -894,7 +1217,90 @@ async function fetchSubtitleTrackText(track: CaptionTrack): Promise<string> {
     return parseXmlLikeSubtitles(raw)
   }
 
-  return stripHtml(raw)
+  return { text: stripHtml(raw), segments: [] }
+}
+
+async function fetchSubtitleFilesWithYtDlp(
+  ytDlp: any,
+  url: string,
+): Promise<{
+  text: string
+  segments: TimedTextSegment[]
+  language?: string
+}> {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'kitchen-subtitles-'))
+
+  try {
+    await ytDlp.execPromise([
+      url,
+      '--skip-download',
+      '--no-playlist',
+      '--no-warnings',
+      '--user-agent',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36',
+      '--referer',
+      'https://www.bilibili.com/',
+      '--add-header',
+      'Accept-Language:zh-CN,zh;q=0.9,en;q=0.8',
+      '--write-auto-subs',
+      '--write-subs',
+      '--sub-langs',
+      'zh-Hans,zh-CN,zh-Hant,en',
+      '--sub-format',
+      'json3/vtt/ttml/srv3/best',
+      '--paths',
+      tempDir,
+      '--output',
+      'captions.%(id)s.%(ext)s',
+    ])
+  } catch {
+    // yt-dlp can fail on a later subtitle language even after writing earlier files.
+    // Continue and parse whatever was already downloaded.
+  }
+
+  try {
+    const files = readdirSync(tempDir)
+      .filter((fileName) => /\.(json3|json|vtt|ttml|srv3|xml)$/i.test(fileName))
+      .sort((left, right) => {
+        const score = (fileName: string) => {
+          const lower = fileName.toLowerCase()
+          if (lower.includes('zh-hans') || lower.includes('zh-cn')) {
+            return 0
+          }
+          if (lower.includes('.zh')) {
+            return 1
+          }
+          if (lower.includes('.en')) {
+            return 2
+          }
+          return 9
+        }
+
+        return score(left) - score(right)
+      })
+
+    for (const fileName of files) {
+      const raw = readFileSync(path.join(tempDir, fileName), 'utf8')
+      const parsed = parseSubtitleTextByExtension(fileName, raw)
+      const text = cleanTranscriptText(parsed.text)
+      const segments = cleanTranscriptSegments(parsed.segments)
+
+      if (text || segments.length > 0) {
+        const languageMatch = fileName.match(
+          /\.([a-z]{2}(?:[-_][a-zA-Z]+)?)\.(?:json3|json|vtt|ttml|srv3|xml)$/i,
+        )
+        return {
+          text,
+          segments,
+          language: languageMatch?.[1],
+        }
+      }
+    }
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true })
+  }
+
+  return { text: '', segments: [] }
 }
 
 function pickBestCaptionTracks(
@@ -995,12 +1401,56 @@ function cleanTranscriptText(raw: string): string {
   return lines.join('。').replace(/\s+/g, ' ').slice(0, 16000).trim()
 }
 
+function cleanTranscriptSegments(segments: TimedTextSegment[]): TimedTextSegment[] {
+  const deduped = new Set<string>()
+  return segments
+    .map((segment) => ({
+      startSeconds: Math.max(0, segment.startSeconds),
+      endSeconds: Math.max(0, segment.endSeconds),
+      text: segment.text.replace(/\s+/g, ' ').trim(),
+    }))
+    .filter(
+      (segment) =>
+        segment.text.length >= 1 &&
+        segment.endSeconds > segment.startSeconds &&
+        !isLikelyNoisyTranscriptLine(segment.text),
+    )
+    .filter((segment) => {
+      const key = `${Math.round(segment.startSeconds * 10)}:${segment.text}`
+      if (deduped.has(key)) {
+        return false
+      }
+
+      deduped.add(key)
+      return true
+    })
+    .slice(0, 2000)
+}
+
+function cleanAsrTranscriptSegments(segments: TimedTextSegment[]): TimedTextSegment[] {
+  const cleaned = cleanTranscriptSegments(segments)
+  if (cleaned.length > 0 || segments.length === 0) {
+    return cleaned
+  }
+
+  return segments
+    .map((segment) => ({
+      startSeconds: Math.max(0, segment.startSeconds),
+      endSeconds: Math.max(0, segment.endSeconds),
+      text: segment.text.replace(/\s+/g, ' ').trim(),
+    }))
+    .filter((segment) => segment.text && segment.endSeconds > segment.startSeconds)
+    .slice(0, 2000)
+}
+
 async function fetchVideoTranscript(
   url: string,
   sourceType: FetchableSource['sourceType'],
   renderedExtraction?: RenderedVideoExtraction | null,
 ): Promise<{
   transcript: string
+  transcriptSegments: TimedTextSegment[]
+  timelineChapters: TimelineChapter[]
   transcriptLanguage?: string
   extractionNotes: string[]
   mediaUrl?: string
@@ -1011,9 +1461,13 @@ async function fetchVideoTranscript(
   if (sourceType !== 'video') {
     return {
       transcript: '',
+      transcriptSegments: [],
+      timelineChapters: [],
       extractionNotes: [],
     }
   }
+
+  const provider = detectVideoProvider(url)
 
   if (externalTranscriptWebhookUrl) {
     try {
@@ -1035,6 +1489,13 @@ async function fetchVideoTranscript(
       if (response.ok) {
         const payload = (await response.json()) as {
           transcript?: string
+          segments?: Array<{
+            startSeconds?: number
+            endSeconds?: number
+            start?: number
+            end?: number
+            text?: string
+          }>
           language?: string
           notes?: string[]
           title?: string
@@ -1043,14 +1504,83 @@ async function fetchVideoTranscript(
         }
 
         if (typeof payload.transcript === 'string' && payload.transcript.trim()) {
+          const transcriptSegments = cleanAsrTranscriptSegments(
+            Array.isArray(payload.segments)
+              ? payload.segments.map((segment) => ({
+                  startSeconds:
+                    typeof segment.startSeconds === 'number'
+                      ? segment.startSeconds
+                      : typeof segment.start === 'number'
+                        ? segment.start
+                        : 0,
+                  endSeconds:
+                    typeof segment.endSeconds === 'number'
+                      ? segment.endSeconds
+                      : typeof segment.end === 'number'
+                        ? segment.end
+                        : 0,
+                  text: typeof segment.text === 'string' ? segment.text : '',
+                }))
+              : [],
+          )
+          let mediaUrl = renderedExtraction?.mediaUrl
+          let timelineChapters: TimelineChapter[] = []
+
+          if (!mediaUrl || timelineChapters.length === 0) {
+            const ytDlp = await getYtDlpWrap()
+            if (ytDlp) {
+              try {
+                const info = await executeYtDlpJson(ytDlp, [
+                  url,
+                  '--skip-download',
+                  '--no-warnings',
+                  '--simulate',
+                  '--dump-single-json',
+                  '--user-agent',
+                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36',
+                  '--referer',
+                  provider === 'bilibili' ? 'https://www.bilibili.com/' : url,
+                  '--add-header',
+                  'Accept-Language:zh-CN,zh;q=0.9,en;q=0.8',
+                ])
+                mediaUrl = mediaUrl || pickYtDlpMediaUrl(info)
+                timelineChapters = (info.chapters ?? [])
+                  .map((chapter) => ({
+                    title: chapter.title?.trim() ?? '',
+                    startSeconds:
+                      typeof chapter.start_time === 'number' && Number.isFinite(chapter.start_time)
+                        ? Math.max(0, chapter.start_time)
+                        : -1,
+                    endSeconds:
+                      typeof chapter.end_time === 'number' && Number.isFinite(chapter.end_time)
+                        ? Math.max(0, chapter.end_time)
+                        : undefined,
+                  }))
+                  .filter((chapter) => chapter.title && chapter.startSeconds >= 0)
+              } catch {
+                // Keep the ASR result even if media metadata enrichment fails.
+              }
+            }
+          }
+
           return {
             transcript: payload.transcript.trim().slice(0, 16000),
+            transcriptSegments,
+            timelineChapters,
             transcriptLanguage: payload.language,
-            mediaUrl: renderedExtraction?.mediaUrl,
+            mediaUrl,
             extractionNotes:
               Array.isArray(payload.notes) && payload.notes.length > 0
-                ? payload.notes
-                : ['已通过外部转写服务获取视频字幕或 ASR 文本。'],
+                ? [
+                    ...payload.notes,
+                    transcriptSegments.length > 0 ? 'ASR 片段已保留起止时间，可用于可靠步骤片段定位。' : '',
+                    mediaUrl ? '已补充可供手机端播放的真实视频地址。' : '',
+                  ].filter(Boolean)
+                : [
+                    '已通过外部转写服务获取视频字幕或 ASR 文本。',
+                    transcriptSegments.length > 0 ? '外部转写服务返回了时间戳片段。' : '',
+                    mediaUrl ? '已补充可供手机端播放的真实视频地址。' : '',
+                  ].filter(Boolean),
             metadataTitle: payload.title,
             metadataDescription: payload.description,
             metadataContent:
@@ -1065,8 +1595,6 @@ async function fetchVideoTranscript(
     }
   }
 
-  const provider = detectVideoProvider(url)
-
   const ytDlp = await getYtDlpWrap()
   if (ytDlp) {
     try {
@@ -1076,10 +1604,18 @@ async function fetchVideoTranscript(
         '--no-warnings',
         '--simulate',
         '--dump-single-json',
+        '--user-agent',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36',
+        '--referer',
+        provider === 'bilibili' ? 'https://www.bilibili.com/' : url,
+        '--add-header',
+        'Accept-Language:zh-CN,zh;q=0.9,en;q=0.8',
         '--write-auto-subs',
         '--write-subs',
         '--sub-langs',
-        'zh-Hans,zh-CN,zh.*,en.*',
+        'zh-Hans,zh-CN,zh-Hant,en',
+        '--sub-format',
+        'json3/vtt/ttml/srv3/best',
       ])
 
       const subtitleCandidates = [
@@ -1089,16 +1625,39 @@ async function fetchVideoTranscript(
       const mediaUrl = renderedExtraction?.mediaUrl || pickYtDlpMediaUrl(info)
 
       let transcript = ''
+      let transcriptSegments: TimedTextSegment[] = []
       let transcriptLanguage: string | undefined
 
       for (const candidate of subtitleCandidates) {
-        transcript = cleanTranscriptText(await fetchSubtitleTrackText(candidate.track))
-        if (transcript) {
+        const parsedSubtitle = await fetchSubtitleTrackText(candidate.track)
+        transcript = cleanTranscriptText(parsedSubtitle.text)
+        transcriptSegments = cleanTranscriptSegments(parsedSubtitle.segments)
+        if (transcript || transcriptSegments.length > 0) {
           transcriptLanguage = candidate.language
           break
         }
       }
 
+      if (!transcript && transcriptSegments.length === 0) {
+        const downloadedSubtitle = await fetchSubtitleFilesWithYtDlp(ytDlp, url)
+        transcript = downloadedSubtitle.text
+        transcriptSegments = downloadedSubtitle.segments
+        transcriptLanguage = downloadedSubtitle.language
+      }
+
+      const timelineChapters = (info.chapters ?? [])
+        .map((chapter) => ({
+          title: chapter.title?.trim() ?? '',
+          startSeconds:
+            typeof chapter.start_time === 'number' && Number.isFinite(chapter.start_time)
+              ? Math.max(0, chapter.start_time)
+              : -1,
+          endSeconds:
+            typeof chapter.end_time === 'number' && Number.isFinite(chapter.end_time)
+              ? Math.max(0, chapter.end_time)
+              : undefined,
+        }))
+        .filter((chapter) => chapter.title && chapter.startSeconds >= 0)
       const chaptersText = (info.chapters ?? [])
         .map((chapter, index) => {
           const title = chapter.title?.trim()
@@ -1121,15 +1680,19 @@ async function fetchVideoTranscript(
 
       return {
         transcript,
+        transcriptSegments,
+        timelineChapters,
         transcriptLanguage,
         mediaUrl,
         extractionNotes: transcript
           ? [
               `已通过 yt-dlp 从${provider ?? '视频站点'}提取字幕或自动字幕。`,
+              transcriptSegments.length > 0 ? '字幕包含时间戳，可用于可靠步骤片段定位。' : '',
               mediaUrl ? '已提取可供手机端播放的真实视频地址。' : '',
             ].filter(Boolean)
           : [
               `已通过 yt-dlp 提取视频元信息，但没有拿到可用字幕或字幕内容已被判定为噪音。`,
+              timelineChapters.length > 0 ? '已提取视频章节，可尝试用于步骤定位。' : '',
               mediaUrl ? '已提取可供手机端播放的真实视频地址。' : '',
             ].filter(Boolean),
         metadataTitle: info.title ?? info.fulltitle,
@@ -1140,11 +1703,15 @@ async function fetchVideoTranscript(
       if (provider === 'bilibili' || provider === 'douyin') {
         return {
           transcript: '',
+          transcriptSegments: [],
+          timelineChapters: [],
+          mediaUrl: renderedExtraction?.mediaUrl,
           extractionNotes: [
             error instanceof Error
               ? `已尝试通过 yt-dlp 解析${provider === 'bilibili' ? 'B 站' : '抖音'}视频，但失败：${error.message}`
               : `已尝试通过 yt-dlp 解析${provider === 'bilibili' ? 'B 站' : '抖音'}视频，但失败。`,
-          ],
+            renderedExtraction?.mediaUrl ? '已保留页面渲染阶段提取到的媒体地址。' : '',
+          ].filter(Boolean),
         }
       }
     }
@@ -1156,6 +1723,8 @@ async function fetchVideoTranscript(
       if (!fetchTranscript) {
         return {
           transcript: '',
+          transcriptSegments: [],
+          timelineChapters: [],
           extractionNotes: ['YouTube 字幕库当前不可用，已退回网页文本抽取。'],
         }
       }
@@ -1172,17 +1741,60 @@ async function fetchVideoTranscript(
         .join(' ')
         .replace(/\s+/g, ' ')
         .slice(0, 16000)
+      const transcriptSegments = cleanTranscriptSegments(
+        transcriptRows.map((row, index, rows) => {
+          const rawStart =
+            typeof row.offset === 'number' && Number.isFinite(row.offset)
+              ? row.offset
+              : typeof row.start === 'number' && Number.isFinite(row.start)
+                ? row.start
+                : null
+          const startSeconds =
+            rawStart !== null ? (rawStart > 1000 ? rawStart / 1000 : rawStart) : index * 4
+          const rawDuration =
+            typeof row.duration === 'number' && Number.isFinite(row.duration) ? row.duration : null
+          const durationSeconds =
+            rawDuration !== null ? (rawDuration > 1000 ? rawDuration / 1000 : rawDuration) : null
+          const nextRawStart =
+            typeof rows[index + 1]?.offset === 'number' && Number.isFinite(rows[index + 1]?.offset)
+              ? rows[index + 1]?.offset
+              : typeof rows[index + 1]?.start === 'number' && Number.isFinite(rows[index + 1]?.start)
+                ? rows[index + 1]?.start
+                : null
+          const nextStart =
+            typeof nextRawStart === 'number'
+              ? nextRawStart > 1000
+                ? nextRawStart / 1000
+                : nextRawStart
+              : null
+
+          return {
+            startSeconds,
+            endSeconds:
+              startSeconds +
+              Math.max(0.8, durationSeconds ?? Math.min(8, Math.max(2, (nextStart ?? startSeconds + 4) - startSeconds))),
+            text: row.text,
+          }
+        }),
+      )
 
       return {
         transcript,
+        transcriptSegments,
+        timelineChapters: [],
         transcriptLanguage: transcriptRows[0]?.lang,
         extractionNotes: transcript
-          ? ['已成功抓取 YouTube 字幕，可用于步骤提炼。']
+          ? [
+              '已成功抓取 YouTube 字幕，可用于步骤提炼。',
+              transcriptSegments.length > 0 ? 'YouTube 字幕包含时间戳，可用于可靠步骤片段定位。' : '',
+            ].filter(Boolean)
           : ['YouTube 字幕接口返回为空，已退回网页文本抽取。'],
       }
     } catch (error) {
       return {
         transcript: '',
+        transcriptSegments: [],
+        timelineChapters: [],
         extractionNotes: [
           error instanceof Error
             ? `YouTube 字幕抓取失败：${error.message}`
@@ -1194,6 +1806,8 @@ async function fetchVideoTranscript(
 
   return {
     transcript: '',
+    transcriptSegments: [],
+    timelineChapters: [],
     extractionNotes: ['暂时没有拿到该视频链接的字幕，将退回网页和元信息抽取。'],
   }
 }
@@ -1267,6 +1881,8 @@ async function fetchSourceFromUrl(url: string): Promise<FetchableSource> {
       content ? '网页正文/元信息' : '',
       renderedExtraction?.mediaUrl || transcriptResult.mediaUrl ? '视频直链' : '',
       transcriptResult.transcript ? '视频字幕/自动字幕' : '',
+      transcriptResult.transcriptSegments.length > 0 ? '字幕时间戳' : '',
+      transcriptResult.timelineChapters.length > 0 ? '视频章节' : '',
     ].filter(Boolean)
 
     if (!content.trim() && !description.trim() && !transcriptResult.transcript.trim()) {
@@ -1282,6 +1898,8 @@ async function fetchSourceFromUrl(url: string): Promise<FetchableSource> {
       sourceType,
       provider,
       transcript: transcriptResult.transcript,
+      transcriptSegments: transcriptResult.transcriptSegments,
+      timelineChapters: transcriptResult.timelineChapters,
       transcriptLanguage: transcriptResult.transcriptLanguage,
       extractionNotes: [
         ...providerMetadata.notes,
@@ -1291,6 +1909,46 @@ async function fetchSourceFromUrl(url: string): Promise<FetchableSource> {
       mediaSignals,
     }
   } catch (error) {
+    const provider = detectVideoProvider(parsedUrl.toString()) ?? undefined
+    if (provider) {
+      const transcriptResult = await fetchVideoTranscript(parsedUrl.toString(), 'video', null)
+      const title = transcriptResult.metadataTitle || '未命名视频菜谱'
+      const description = transcriptResult.metadataDescription || ''
+      const content = (transcriptResult.metadataContent || '').slice(0, 20000)
+      const mediaSignals = [
+        title ? '视频元信息标题' : '',
+        description ? '视频元信息简介' : '',
+        content ? '视频元信息正文' : '',
+        transcriptResult.mediaUrl ? '视频直链' : '',
+        transcriptResult.transcript ? '视频字幕/自动字幕' : '',
+        transcriptResult.transcriptSegments.length > 0 ? '字幕时间戳' : '',
+        transcriptResult.timelineChapters.length > 0 ? '视频章节' : '',
+      ].filter(Boolean)
+
+      if (content.trim() || description.trim() || transcriptResult.transcript.trim()) {
+        return {
+          url: parsedUrl.toString(),
+          mediaUrl: transcriptResult.mediaUrl,
+          title,
+          description,
+          content,
+          sourceType: 'video',
+          provider,
+          transcript: transcriptResult.transcript,
+          transcriptSegments: transcriptResult.transcriptSegments,
+          timelineChapters: transcriptResult.timelineChapters,
+          transcriptLanguage: transcriptResult.transcriptLanguage,
+          extractionNotes: [
+            error instanceof Error
+              ? `网页直接抓取失败，已改用 yt-dlp/转写兜底：${error.message}`
+              : '网页直接抓取失败，已改用 yt-dlp/转写兜底。',
+            ...transcriptResult.extractionNotes,
+          ],
+          mediaSignals,
+        }
+      }
+    }
+
     if (error instanceof Error && error.name === 'AbortError') {
       throw new Error('链接抓取超时，请稍后重试。')
     }
@@ -1314,6 +1972,7 @@ function buildImportSystemPrompt(): string {
     'video.url 优先填“可播放视频地址”；如果没有可播放地址，再填原始链接，posterUrl 可以省略。',
     '只有在字幕时间戳、章节或页面明确给出时间范围时，才填写 video.startSeconds 和 video.endSeconds；不要按步骤时长平均估算视频片段。',
     '如果提供了视频字幕，请优先结合字幕来拆分真实步骤。',
+    '如果提供了“带时间戳的字幕片段”，每一步的视频片段必须尽量对应字幕里同一动作的真实起止时间，而不是整段视频或平均切片。',
     '如果字幕、章节和网页简介冲突，优先采信更具体、更像操作指令的内容。',
     '如果给了“结构化证据”，请优先采用结构化证据中的食材、步骤、状态和风险点，不要退化成过于笼统的模板。',
   ].join('')
@@ -1324,8 +1983,9 @@ function buildEvidenceSystemPrompt(): string {
     '你是一个做饭视频解析助手，要先把视频或文章里的可执行信息提炼成“做菜证据”。',
     '请只输出严格 JSON，不要加解释，不要加 markdown。',
     '目标不是生成最终菜谱，而是尽量完整地抽取：菜名、食材、工具、关键技法、步骤顺序、每步细节、状态判断、常见失误和补救提示。',
-    '如果信息不确定，请写进 uncertainties，不要胡编具体克数。',
+    '如果信息不确定，请写进 uncertainties；食材数量不要写“适量/少许”，必须给出可执行估算，例如“约 250 克”“2 个”“1 汤勺”。',
     'timeline 必须尽量反映原视频的真实先后顺序，每一步都要包含 action、detail、sensoryCue、durationMinutes。',
+    '如果字幕或章节提供了明确时间，请在 timeline 每步中写入 startSeconds 和 endSeconds；如果没有明确时间，不要硬编。',
     '如果信息来自字幕或章节，要优先保留这些更接近原视频的细节。',
   ].join('')
 }
@@ -1340,7 +2000,7 @@ function buildEvidenceUserPrompt(source: FetchableSource): string {
         dishName: '九转大肠',
         summary: '先清洗处理大肠，再炸制定型，最后调汁回锅收成酸甜微辣的九转大肠。',
         ingredients: [
-          { name: '猪大肠', amount: '适量', note: '主食材，需彻底处理异味' },
+          { name: '猪大肠', amount: '约 500 克', note: '主食材，需彻底处理异味' },
         ],
         tools: ['炒锅', '刀', '案板'],
         keyTechniques: ['处理异味', '炸制定型', '调酸甜汁', '回锅收汁'],
@@ -1351,6 +2011,8 @@ function buildEvidenceUserPrompt(source: FetchableSource): string {
             detail: '关注原视频里强调的预处理顺序和清洗重点。',
             sensoryCue: '异味明显减弱，表面处理干净，形状便于后续下锅。',
             durationMinutes: 10,
+            startSeconds: 12,
+            endSeconds: 58,
           },
         ],
         criticalTips: ['如果视频特别强调某个火候或调味节点，要单独写出来。'],
@@ -1377,6 +2039,14 @@ function buildEvidenceUserPrompt(source: FetchableSource): string {
     `简介：${source.description || '无'}`,
     `抓取备注：${source.extractionNotes.join('；') || '无'}`,
     source.transcriptLanguage ? `字幕语言：${source.transcriptLanguage}` : '字幕语言：未知',
+    `可用字幕时间戳片段数：${source.transcriptSegments.length}`,
+    `可用视频章节数：${source.timelineChapters.length}`,
+    '',
+    '带时间戳的字幕片段（请优先据此判断步骤起止时间；如果没有匹配内容，不要硬编时间）：',
+    buildTimestampedTranscriptBlock(source.transcriptSegments),
+    '',
+    '视频章节时间轴：',
+    buildChapterTimelineBlock(source.timelineChapters),
     '',
     '网页正文和站点元信息：',
     source.content || '无',
@@ -1457,6 +2127,15 @@ function buildImportUserPrompt(source: FetchableSource): string {
     `简介：${source.description || '无'}`,
     `抓取备注：${source.extractionNotes.join('；') || '无'}`,
     source.transcriptLanguage ? `字幕语言：${source.transcriptLanguage}` : '字幕语言：未知',
+    `可用字幕时间戳片段数：${source.transcriptSegments.length}`,
+    `可用视频章节数：${source.timelineChapters.length}`,
+    '',
+    '带时间戳的字幕片段（如果要填写 video.startSeconds/video.endSeconds，只能使用这里或章节中的真实时间）：',
+    buildTimestampedTranscriptBlock(source.transcriptSegments),
+    '',
+    '视频章节时间轴：',
+    buildChapterTimelineBlock(source.timelineChapters),
+    '',
     '网页正文或元信息：',
     source.content,
     '',
@@ -1477,6 +2156,7 @@ function buildImportUserPromptWithEvidence(source: FetchableSource, evidence: Re
     '2. 每一步都要给出新手能执行的动作、判断标准和朗读文案。',
     '3. 如果证据里有 uncertainties，不要硬编非常具体的克数或秒数。',
     '4. 如果视频来源信息不足，也要保持步骤真实、克制，不要套用与原菜无关的模板。',
+    '5. 食材 amount 禁止使用“适量”“少许”“若干”，不确定时也要给新手可执行的估算量，并在说明里体现“约”。',
   ].join('\n')
 }
 
@@ -1487,48 +2167,19 @@ function parseJsonFromModelResponse(raw: string): unknown {
   return JSON.parse(candidate)
 }
 
-async function callDeepSeekJson(
-  apiKey: string,
+async function callLlmJson(
   messages: Array<{ role: 'system' | 'user'; content: string }>,
   maxTokens: number,
 ): Promise<unknown> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), requestTimeoutMs)
+  const content = await callChatCompletion({
+    messages,
+    maxTokens,
+    temperature: 0.15,
+    jsonMode: true,
+    timeoutMs: requestTimeoutMs,
+  })
 
-  try {
-    const response = await fetch(`${deepseekBaseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: deepseekModel,
-        temperature: 0.15,
-        max_tokens: maxTokens,
-        response_format: {
-          type: 'json_object',
-        },
-        messages,
-      }),
-      signal: controller.signal,
-    })
-
-    if (!response.ok) {
-      const raw = await response.text()
-      throw new Error(`大模型生成失败：${response.status} ${raw.slice(0, 300)}`)
-    }
-
-    const payload = (await response.json()) as DeepSeekResponse
-    const content = payload.choices?.[0]?.message?.content?.trim()
-    if (!content) {
-      throw new Error('大模型没有返回可用内容。')
-    }
-
-    return parseJsonFromModelResponse(content)
-  } finally {
-    clearTimeout(timeout)
-  }
+  return parseJsonFromModelResponse(content)
 }
 
 function normalizeRecipeEvidence(payload: unknown): RecipeEvidence {
@@ -1537,7 +2188,7 @@ function normalizeRecipeEvidence(payload: unknown): RecipeEvidence {
 
   const timeline = Array.isArray(raw.timeline)
     ? raw.timeline
-        .map((item, index) => {
+        .map((item, index): RecipeEvidence['timeline'][number] | null => {
           const record =
             typeof item === 'object' && item !== null ? (item as Record<string, unknown>) : {}
           const title = typeof record.title === 'string' ? record.title.trim() : ''
@@ -1549,6 +2200,18 @@ function normalizeRecipeEvidence(payload: unknown): RecipeEvidence {
             typeof record.durationMinutes === 'number' && Number.isFinite(record.durationMinutes)
               ? Math.max(1, Math.round(record.durationMinutes))
               : 4
+          const startSeconds =
+            typeof record.startSeconds === 'number' && Number.isFinite(record.startSeconds)
+              ? Math.max(0, record.startSeconds)
+              : typeof record.startSeconds === 'string'
+                ? parseTimeExpression(record.startSeconds) ?? undefined
+              : undefined
+          const endSeconds =
+            typeof record.endSeconds === 'number' && Number.isFinite(record.endSeconds)
+              ? Math.max(0, record.endSeconds)
+              : typeof record.endSeconds === 'string'
+                ? parseTimeExpression(record.endSeconds) ?? undefined
+              : undefined
 
           if (!title && !action && !detail) {
             return null
@@ -1560,6 +2223,14 @@ function normalizeRecipeEvidence(payload: unknown): RecipeEvidence {
             detail: detail || action || '这是根据源材料提取出的动作摘要。',
             sensoryCue: sensoryCue || '观察颜色、香味、软硬和汁水状态的变化。',
             durationMinutes,
+            startSeconds:
+              startSeconds !== undefined && endSeconds !== undefined && endSeconds > startSeconds
+                ? startSeconds
+                : undefined,
+            endSeconds:
+              startSeconds !== undefined && endSeconds !== undefined && endSeconds > startSeconds
+                ? endSeconds
+                : undefined,
           }
         })
         .filter(
@@ -1571,6 +2242,8 @@ function normalizeRecipeEvidence(payload: unknown): RecipeEvidence {
             detail: string
             sensoryCue: string
             durationMinutes: number
+            startSeconds?: number
+            endSeconds?: number
           } => item !== null,
         )
     : []
@@ -1588,10 +2261,12 @@ function normalizeRecipeEvidence(payload: unknown): RecipeEvidence {
             typeof item === 'object' && item !== null ? (item as Record<string, unknown>) : {}
           const name =
             typeof record.name === 'string' && record.name.trim() ? record.name.trim() : ''
-          const amount =
+          const amount = normalizeIngredientAmount(
+            name,
             typeof record.amount === 'string' && record.amount.trim()
               ? record.amount.trim()
-              : '适量'
+              : '',
+          )
           const note =
             typeof record.note === 'string' && record.note.trim() ? record.note.trim() : undefined
 
@@ -1629,9 +2304,8 @@ function normalizeRecipeEvidence(payload: unknown): RecipeEvidence {
   }
 }
 
-async function extractRecipeEvidence(apiKey: string, source: FetchableSource): Promise<RecipeEvidence> {
-  const payload = await callDeepSeekJson(
-    apiKey,
+async function extractRecipeEvidence(source: FetchableSource): Promise<RecipeEvidence> {
+  const payload = await callLlmJson(
     [
       {
         role: 'system',
@@ -1679,6 +2353,343 @@ function buildSourceStepVideo(
   }
 }
 
+function normalizeMatchText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\u4e00-\u9fa5]/gu, '')
+    .trim()
+}
+
+function extractMatchTokens(value: string): Set<string> {
+  const normalized = normalizeMatchText(value)
+  const tokens = new Set<string>()
+  const phraseMatches = value.match(/[\u4e00-\u9fa5]{2,8}/g) ?? []
+  const stopWords = new Set([
+    '这个',
+    '然后',
+    '一下',
+    '我们',
+    '可以',
+    '开始',
+    '步骤',
+    '视频',
+    '原始',
+    '攻略',
+    '链接',
+    '状态',
+    '继续',
+    '注意',
+  ])
+
+  for (const phrase of phraseMatches) {
+    if (!stopWords.has(phrase) && phrase.length >= 2) {
+      tokens.add(phrase)
+    }
+  }
+
+  for (let index = 0; index < normalized.length - 1; index += 1) {
+    const token = normalized.slice(index, index + 2)
+    if (/[\u4e00-\u9fa5]{2}/.test(token) && !stopWords.has(token)) {
+      tokens.add(token)
+    }
+  }
+
+  return tokens
+}
+
+function overlapScore(left: Set<string>, right: Set<string>): number {
+  if (left.size === 0 || right.size === 0) {
+    return 0
+  }
+
+  let intersection = 0
+  for (const token of left) {
+    if (right.has(token)) {
+      intersection += 1
+    }
+  }
+
+  return intersection / Math.sqrt(left.size * right.size)
+}
+
+function getStepMatchText(step: Step): string {
+  return [
+    step.title,
+    step.instruction,
+    step.detail,
+    step.sensoryCue,
+    step.voiceover,
+    ...step.demoFrames,
+  ]
+    .filter(Boolean)
+    .join('。')
+}
+
+function findBestTranscriptSegmentForStep(
+  step: Step,
+  segments: TimedTextSegment[],
+  cursorSeconds: number,
+): { startSeconds: number; endSeconds: number; score: number } | null {
+  const stepTokens = extractMatchTokens(getStepMatchText(step))
+  if (stepTokens.size === 0 || segments.length === 0) {
+    return null
+  }
+
+  let best: { startSeconds: number; endSeconds: number; score: number } | null = null
+  const startIndex = segments.findIndex(
+    (segment) => segment.endSeconds >= Math.max(0, cursorSeconds - 3),
+  )
+  const safeStartIndex = startIndex === -1 ? 0 : startIndex
+
+  for (let index = safeStartIndex; index < segments.length; index += 1) {
+    const first = segments[index]
+    if (!first || first.startSeconds < cursorSeconds - 8) {
+      continue
+    }
+
+    let text = ''
+    for (let endIndex = index; endIndex < Math.min(segments.length, index + 14); endIndex += 1) {
+      const last = segments[endIndex]
+      if (!last) {
+        continue
+      }
+
+      const duration = last.endSeconds - first.startSeconds
+      if (duration > 120) {
+        break
+      }
+
+      text = `${text} ${last.text}`.trim()
+      if (duration < 5) {
+        continue
+      }
+
+      const windowTokens = extractMatchTokens(text)
+      const score = overlapScore(stepTokens, windowTokens)
+      const actionBonus =
+        /(洗|切|焯|煮|炖|炒|炸|蒸|拌|腌|翻炒|收汁|装盘|调味|下锅|焯水|爆香|煎)/.test(
+          text,
+        ) && /(洗|切|焯|煮|炖|炒|炸|蒸|拌|腌|翻炒|收汁|装盘|调味|下锅|焯水|爆香|煎)/.test(
+          getStepMatchText(step),
+        )
+          ? 0.06
+          : 0
+      const adjustedScore = score + actionBonus
+
+      if (!best || adjustedScore > best.score) {
+        best = {
+          startSeconds: Math.max(0, first.startSeconds - 1),
+          endSeconds: last.endSeconds + 1.5,
+          score: adjustedScore,
+        }
+      }
+    }
+  }
+
+  return best && best.score >= 0.34 ? best : null
+}
+
+function findBestChapterSegmentForStep(
+  step: Step,
+  chapters: TimelineChapter[],
+  cursorSeconds: number,
+): { startSeconds: number; endSeconds: number; score: number } | null {
+  const stepTokens = extractMatchTokens(getStepMatchText(step))
+  if (stepTokens.size === 0 || chapters.length === 0) {
+    return null
+  }
+
+  const candidates = chapters
+    .map((chapter, index) => {
+      const nextChapter = chapters[index + 1]
+      const inferredEnd = chapter.endSeconds ?? nextChapter?.startSeconds
+      if (!inferredEnd || inferredEnd <= chapter.startSeconds || chapter.startSeconds < cursorSeconds - 8) {
+        return null
+      }
+
+      return {
+        startSeconds: chapter.startSeconds,
+        endSeconds: inferredEnd,
+        score: overlapScore(stepTokens, extractMatchTokens(chapter.title)),
+      }
+    })
+    .filter(
+      (
+        item,
+      ): item is {
+        startSeconds: number
+        endSeconds: number
+        score: number
+      } => item !== null,
+    )
+    .sort((left, right) => right.score - left.score)
+
+  const best = candidates[0]
+  return best && best.score >= 0.42 ? best : null
+}
+
+function findEvidenceSegmentForStep(
+  step: Step,
+  evidence: RecipeEvidence | undefined,
+  stepIndex: number,
+  cursorSeconds: number,
+): { startSeconds: number; endSeconds: number; score: number } | null {
+  const timeline = evidence?.timeline ?? []
+  if (timeline.length === 0) {
+    return null
+  }
+
+  const direct = timeline[stepIndex]
+  if (
+    direct &&
+    typeof direct.startSeconds === 'number' &&
+    typeof direct.endSeconds === 'number' &&
+    direct.endSeconds > direct.startSeconds &&
+    direct.startSeconds >= cursorSeconds - 8
+  ) {
+    return {
+      startSeconds: direct.startSeconds,
+      endSeconds: direct.endSeconds,
+      score: 1,
+    }
+  }
+
+  const stepTokens = extractMatchTokens(getStepMatchText(step))
+  const candidates = timeline
+    .map((item) => {
+      if (
+        typeof item.startSeconds !== 'number' ||
+        typeof item.endSeconds !== 'number' ||
+        item.endSeconds <= item.startSeconds ||
+        item.startSeconds < cursorSeconds - 8
+      ) {
+        return null
+      }
+
+      return {
+        startSeconds: item.startSeconds,
+        endSeconds: item.endSeconds,
+        score: overlapScore(
+          stepTokens,
+          extractMatchTokens([item.title, item.action, item.detail, item.sensoryCue].join('。')),
+        ),
+      }
+    })
+    .filter(
+      (
+        item,
+      ): item is {
+        startSeconds: number
+        endSeconds: number
+        score: number
+      } => item !== null,
+    )
+    .sort((left, right) => right.score - left.score)
+
+  const best = candidates[0]
+  return best && best.score >= 0.38 ? best : null
+}
+
+function getSequentialTranscriptWindow(
+  segments: TimedTextSegment[],
+  stepIndex: number,
+  stepCount: number,
+): { startSeconds: number; endSeconds: number; score: number } | null {
+  if (segments.length === 0 || stepCount <= 0) {
+    return null
+  }
+
+  const cleanedSegments = segments.filter(
+    (segment) => segment.endSeconds > segment.startSeconds && segment.text.trim(),
+  )
+  if (cleanedSegments.length === 0) {
+    return null
+  }
+
+  const startIndex = Math.floor((stepIndex / stepCount) * cleanedSegments.length)
+  const endIndexExclusive = Math.max(
+    startIndex + 1,
+    Math.floor(((stepIndex + 1) / stepCount) * cleanedSegments.length),
+  )
+  const windowSegments = cleanedSegments.slice(startIndex, endIndexExclusive)
+  const first = windowSegments[0]
+  const last = windowSegments[windowSegments.length - 1]
+  if (!first || !last) {
+    return null
+  }
+
+  return {
+    startSeconds: Math.max(0, first.startSeconds - 1),
+    endSeconds: last.endSeconds + 1.5,
+    score: 0.25,
+  }
+}
+
+function applyReliableVideoTimeline(
+  recipe: Recipe,
+  source: FetchableSource,
+  evidence?: RecipeEvidence,
+): Recipe {
+  if (source.sourceType !== 'video') {
+    return recipe
+  }
+
+  let cursorSeconds = 0
+  const steps = recipe.steps.map((step, stepIndex) => {
+    const existingStart = step.video?.startSeconds
+    const existingEnd = step.video?.endSeconds
+    if (
+      typeof existingStart === 'number' &&
+      typeof existingEnd === 'number' &&
+      Number.isFinite(existingStart) &&
+      Number.isFinite(existingEnd) &&
+      existingEnd > existingStart
+    ) {
+      cursorSeconds = existingEnd
+      return step
+    }
+
+    const evidenceMatch = findEvidenceSegmentForStep(step, evidence, stepIndex, cursorSeconds)
+    const transcriptMatch = !evidenceMatch
+      ? findBestTranscriptSegmentForStep(step, source.transcriptSegments, cursorSeconds)
+      : null
+    const chapterMatch = !evidenceMatch && !transcriptMatch
+      ? findBestChapterSegmentForStep(step, source.timelineChapters, cursorSeconds)
+      : null
+    const sequentialTranscriptMatch = !evidenceMatch && !transcriptMatch && !chapterMatch
+      ? getSequentialTranscriptWindow(source.transcriptSegments, stepIndex, recipe.steps.length)
+      : null
+    const match = evidenceMatch ?? transcriptMatch ?? chapterMatch ?? sequentialTranscriptMatch
+
+    if (!match) {
+      return step
+    }
+
+    cursorSeconds = match.endSeconds
+    const captionSuffix = sequentialTranscriptMatch === match ? ' · 已按字幕顺序匹配时间轴' : ' · 已匹配可靠时间轴'
+    return {
+      ...step,
+      video: buildSourceStepVideo(
+        source,
+        `${step.video?.caption ?? '原始攻略链接'}${captionSuffix}`,
+        {
+          startSeconds: Math.round(match.startSeconds * 10) / 10,
+          endSeconds: Math.round(match.endSeconds * 10) / 10,
+        },
+      ),
+    }
+  })
+
+  return {
+    ...recipe,
+    steps,
+    riskNote:
+      steps.some((step) => step.video?.startSeconds !== undefined)
+        ? `${recipe.riskNote} 已根据字幕/章节为部分步骤匹配可靠视频片段，未匹配步骤仍播放完整视频。`
+        : recipe.riskNote,
+  }
+}
+
 function normalizeStep(step: unknown, index: number, source: FetchableSource): Step {
   const raw = typeof step === 'object' && step !== null ? (step as Record<string, unknown>) : {}
   const videoRecord =
@@ -1693,10 +2704,14 @@ function normalizeStep(step: unknown, index: number, source: FetchableSource): S
   const rawStartSeconds =
     videoRecord && typeof videoRecord.startSeconds === 'number' && Number.isFinite(videoRecord.startSeconds)
       ? Math.max(0, videoRecord.startSeconds)
+      : videoRecord && typeof videoRecord.startSeconds === 'string'
+        ? parseTimeExpression(videoRecord.startSeconds) ?? undefined
       : undefined
   const rawEndSeconds =
     videoRecord && typeof videoRecord.endSeconds === 'number' && Number.isFinite(videoRecord.endSeconds)
       ? Math.max(0, videoRecord.endSeconds)
+      : videoRecord && typeof videoRecord.endSeconds === 'string'
+        ? parseTimeExpression(videoRecord.endSeconds) ?? undefined
       : undefined
   const demoFrames = normalizeStringArray(raw.demoFrames, ['准备动作', '关键动作', '收尾动作']).slice(0, 3)
 
@@ -1844,12 +2859,12 @@ function normalizeImportedRecipe(payload: unknown, source: FetchableSource): Rec
             const amount =
               typeof record.amount === 'string' && record.amount.trim()
                 ? record.amount.trim()
-                : '适量'
+                : ''
 
-            return name ? { name, amount } : null
+            return name ? { name, amount: normalizeIngredientAmount(name, amount) } : null
           })
           .filter((item): item is { name: string; amount: string } => item !== null)
-      : [{ name: '请根据原链接补充食材', amount: '适量' }],
+      : [{ name: '主要食材', amount: '约 300 克' }],
     substitutions: Array.isArray(raw.substitutions)
       ? raw.substitutions
           .map((item) => {
@@ -1999,9 +3014,9 @@ function extractIngredientHints(
   const next = candidates
     .filter((item) => joinedText.includes(item))
     .slice(0, 8)
-    .map((item) => ({ name: item, amount: '适量' }))
+    .map((item) => ({ name: item, amount: inferConcreteIngredientAmount(item) }))
 
-  return next.length > 0 ? next : [{ name: '请根据原视频补充食材', amount: '适量' }]
+  return next.length > 0 ? next : [{ name: '主要食材', amount: '约 300 克' }]
 }
 
 function buildFallbackSteps(source: FetchableSource, evidence?: RecipeEvidence): Step[] {
@@ -2038,6 +3053,58 @@ function buildFallbackSteps(source: FetchableSource, evidence?: RecipeEvidence):
         `原始攻略链接${array.length > 1 ? ` · 第 ${index + 1} 步参考` : ''}`,
       ),
     }))
+  }
+
+  if (source.sourceType === 'video' && source.timelineChapters.length >= 3) {
+    return source.timelineChapters
+      .slice(0, 10)
+      .map((chapter, index, chapters) => {
+        const nextChapter = chapters[index + 1]
+        const endSeconds = chapter.endSeconds ?? nextChapter?.startSeconds
+        const hasReliableSegment =
+          typeof endSeconds === 'number' &&
+          Number.isFinite(endSeconds) &&
+          endSeconds > chapter.startSeconds
+        const cleanedTitle = chapter.title.replace(/^\d+\s*[.、-]\s*/, '').trim()
+        const title = cleanedTitle || `视频章节 ${index + 1}`
+        const demoFrames: [string, string, string] = [
+          `章节 ${index + 1}：${title}`.slice(0, 24),
+          hasReliableSegment
+            ? `${formatTimestamp(chapter.startSeconds)} 开始看`
+            : '打开原视频对照',
+          hasReliableSegment ? `${formatTimestamp(endSeconds)} 前完成` : '状态到位再继续',
+        ]
+
+        return {
+          title,
+          instruction: `按照原视频章节“${title}”完成这一段操作。`,
+          detail:
+            '这是根据视频章节时间轴生成的草稿步骤，优先保证能对照原视频对应片段操作；细节可在导入后继续编辑完善。',
+          durationMinutes: hasReliableSegment
+            ? Math.max(1, Math.round((endSeconds - chapter.startSeconds) / 60))
+            : 4,
+          sensoryCue: '对照视频画面，确认当前食材状态和章节动作基本一致。',
+          checkpoints: [
+            '当前操作与章节标题一致',
+            '先看完这一小段再继续下一步',
+            '如果视频状态还没到位，暂停在本步骤继续处理',
+          ],
+          commonMistakes: ['跳过视频里的关键处理动作', '只看章节标题，不对照画面状态'],
+          demoFrames,
+          voiceover: `现在对照视频章节“${title}”。先把这一段做到位，再进入下一步。`,
+          video: buildSourceStepVideo(
+            source,
+            `视频章节时间轴 · 第 ${index + 1} 段`,
+            hasReliableSegment
+              ? {
+                  startSeconds: Math.round(chapter.startSeconds * 10) / 10,
+                  endSeconds: Math.round(endSeconds * 10) / 10,
+                }
+              : undefined,
+          ),
+        }
+      })
+      .filter((step) => step.video.startSeconds !== undefined && step.video.endSeconds !== undefined)
   }
 
   const sentences =
@@ -2191,10 +3258,9 @@ function buildFallbackRecipeDraft(source: FetchableSource, evidence?: RecipeEvid
 export async function importRecipeFromUrl(url: string): Promise<{
   recipe: Recipe
   source: FetchableSource
-  generationMode?: 'deepseek' | 'fallback-draft'
+  generationMode?: LlmProvider | 'fallback-draft'
 }> {
-  const apiKey = process.env.DEEPSEEK_API_KEY?.trim()
-  if (!apiKey) {
+  if (!isLlmConfigured()) {
     throw new Error('当前未配置大模型密钥，暂时无法从链接生成菜谱。')
   }
 
@@ -2203,13 +3269,21 @@ export async function importRecipeFromUrl(url: string): Promise<{
   let sourceWithNotes = source
 
   try {
-    evidence = await extractRecipeEvidence(apiKey, source)
+    evidence = await extractRecipeEvidence(source)
     sourceWithNotes = {
       ...sourceWithNotes,
       extractionNotes: [...sourceWithNotes.extractionNotes, '已通过大模型先提炼视频/文章证据，再生成最终攻略。'],
       mediaSignals: [
         ...sourceWithNotes.mediaSignals,
         ...(evidence.timeline.length > 0 ? ['结构化步骤证据'] : []),
+        ...(evidence.timeline.some(
+          (step) =>
+            typeof step.startSeconds === 'number' &&
+            typeof step.endSeconds === 'number' &&
+            step.endSeconds > step.startSeconds,
+        )
+          ? ['结构化时间轴证据']
+          : []),
         ...(evidence.ingredients.length > 0 ? ['结构化食材证据'] : []),
       ],
     }
@@ -2226,8 +3300,7 @@ export async function importRecipeFromUrl(url: string): Promise<{
   }
 
   try {
-    const parsed = await callDeepSeekJson(
-      apiKey,
+    const parsed = await callLlmJson(
       [
         {
           role: 'system',
@@ -2242,17 +3315,25 @@ export async function importRecipeFromUrl(url: string): Promise<{
       ],
       4200,
     )
-    const recipe = normalizeImportedRecipe(parsed, sourceWithNotes)
+    const recipe = applyReliableVideoTimeline(
+      normalizeImportedRecipe(parsed, sourceWithNotes),
+      sourceWithNotes,
+      evidence ?? undefined,
+    )
 
     return {
       recipe,
       source: sourceWithNotes,
-      generationMode: 'deepseek',
+      generationMode: getLlmRuntimeInfo().provider,
     }
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       return {
-        recipe: buildFallbackRecipeDraft(sourceWithNotes, evidence ?? undefined),
+        recipe: applyReliableVideoTimeline(
+          buildFallbackRecipeDraft(sourceWithNotes, evidence ?? undefined),
+          sourceWithNotes,
+          evidence ?? undefined,
+        ),
         source: {
           ...sourceWithNotes,
           extractionNotes: [
@@ -2267,7 +3348,11 @@ export async function importRecipeFromUrl(url: string): Promise<{
     }
 
     return {
-      recipe: buildFallbackRecipeDraft(sourceWithNotes, evidence ?? undefined),
+      recipe: applyReliableVideoTimeline(
+        buildFallbackRecipeDraft(sourceWithNotes, evidence ?? undefined),
+        sourceWithNotes,
+        evidence ?? undefined,
+      ),
       source: {
         ...sourceWithNotes,
         extractionNotes: [
