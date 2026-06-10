@@ -1,5 +1,6 @@
 import { Capacitor } from '@capacitor/core'
 import { SpeechRecognition } from '@capacitor-community/speech-recognition'
+import { TextToSpeech } from '@capacitor-community/text-to-speech'
 import {
   startTransition,
   useDeferredValue,
@@ -29,6 +30,7 @@ import {
   type ChatMessage,
   type Screen,
   type TimeLimit,
+  type VoiceDiagnostics,
   type VoiceStatus,
 } from './shared.js'
 
@@ -142,6 +144,22 @@ export function useKitchenApp() {
   const [recognitionMode, setRecognitionMode] = useState<'native' | 'web' | 'none'>(
     isNativePlatform ? 'native' : webRecognitionSupported ? 'web' : 'none',
   )
+  const [voiceDiagnostics, setVoiceDiagnostics] = useState<VoiceDiagnostics>({
+    isNativePlatform,
+    recognitionMode: isNativePlatform ? 'native' : webRecognitionSupported ? 'web' : 'none',
+    recognitionSupported: isNativePlatform ? true : webRecognitionSupported,
+    voiceEnabled: false,
+    isNativeVoiceListening: false,
+    permission: '未检测',
+    available: '未检测',
+    supportedLanguages: '未检测',
+    lastPartial: '',
+    lastResult: '',
+    lastError: '',
+    ttsStatus: '未检测',
+    isRunningProbe: false,
+    logs: [],
+  })
 
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const nativeRecognitionActiveRef = useRef(false)
@@ -156,6 +174,216 @@ export function useKitchenApp() {
   const currentRecipeCompletions = selectedRecipe
     ? history.filter((entry) => entry.recipeId === selectedRecipe.id).length
     : 0
+
+  const formatDiagnosticValue = (value: unknown): string => {
+    if (typeof value === 'string') {
+      return value
+    }
+
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return String(value)
+    }
+  }
+
+  const appendVoiceDiagnostic = (
+    level: VoiceDiagnostics['logs'][number]['level'],
+    message: string,
+  ) => {
+    setVoiceDiagnostics((previous) => ({
+      ...previous,
+      logs: [
+        {
+          id: `voice-log-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          at: new Date().toLocaleTimeString(),
+          level,
+          message,
+        },
+        ...previous.logs,
+      ].slice(0, 18),
+    }))
+  }
+
+  const refreshVoiceDiagnostics = async () => {
+    appendVoiceDiagnostic('info', '开始刷新语音服务状态。')
+    const next: Partial<VoiceDiagnostics> = {
+      isNativePlatform,
+      recognitionMode,
+      recognitionSupported,
+      voiceEnabled,
+      isNativeVoiceListening,
+    }
+
+    if (recognitionMode === 'native') {
+      try {
+        const available = await SpeechRecognition.available()
+        next.available = formatDiagnosticValue(available)
+      } catch (error) {
+        next.available = `available() 失败：${formatDiagnosticValue(error)}`
+        next.lastError = next.available
+      }
+
+      try {
+        const permissions = await SpeechRecognition.checkPermissions()
+        next.permission = formatDiagnosticValue(permissions)
+      } catch (error) {
+        next.permission = `checkPermissions() 失败：${formatDiagnosticValue(error)}`
+        next.lastError = next.permission
+      }
+
+      try {
+        const languages = await SpeechRecognition.getSupportedLanguages()
+        next.supportedLanguages = formatDiagnosticValue(languages)
+      } catch (error) {
+        next.supportedLanguages = `getSupportedLanguages() 失败：${formatDiagnosticValue(error)}`
+        next.lastError = next.supportedLanguages
+      }
+    } else {
+      next.available = webRecognitionSupported ? 'Web Speech API 可用' : 'Web Speech API 不可用'
+      next.permission = 'Web 模式由浏览器弹窗授权'
+      next.supportedLanguages = '浏览器决定支持语言'
+    }
+
+    setVoiceDiagnostics((previous) => ({
+      ...previous,
+      ...next,
+    }))
+    appendVoiceDiagnostic('ok', '语音服务状态刷新完成。')
+  }
+
+  const runTtsDiagnostic = async () => {
+    appendVoiceDiagnostic('info', '开始测试文字朗读。')
+
+    if (!Capacitor.isNativePlatform()) {
+      await speak('小白下厨语音朗读测试。')
+      setVoiceDiagnostics((previous) => ({ ...previous, ttsStatus: 'Web speechSynthesis 已调用。' }))
+      appendVoiceDiagnostic('ok', 'Web 朗读测试已调用。')
+      return
+    }
+
+    try {
+      const languages = await TextToSpeech.getSupportedLanguages().catch((error) => ({
+        error: formatDiagnosticValue(error),
+      }))
+      const voices = await TextToSpeech.getSupportedVoices().catch((error) => ({
+        error: formatDiagnosticValue(error),
+      }))
+      await TextToSpeech.stop().catch(() => undefined)
+      await TextToSpeech.speak({
+        text: '小白下厨语音朗读测试。如果你听到了这句话，朗读服务可用。',
+        lang: 'zh-CN',
+        rate: 1,
+        pitch: 1,
+        volume: 1,
+      })
+      const status = `朗读成功；languages=${formatDiagnosticValue(languages)}；voices=${formatDiagnosticValue(voices).slice(0, 220)}`
+      setVoiceDiagnostics((previous) => ({ ...previous, ttsStatus: status, lastError: '' }))
+      appendVoiceDiagnostic('ok', status)
+    } catch (error) {
+      const message = `朗读失败：${formatDiagnosticValue(error)}`
+      setVoiceDiagnostics((previous) => ({ ...previous, ttsStatus: message, lastError: message }))
+      appendVoiceDiagnostic('error', message)
+    }
+  }
+
+  const runVoiceListenProbe = async () => {
+    appendVoiceDiagnostic('info', '开始 8 秒语音监听测试。')
+    setVoiceEnabled(false)
+    setVoiceDiagnostics((previous) => ({
+      ...previous,
+      isRunningProbe: true,
+      lastPartial: '',
+      lastResult: '',
+      lastError: '',
+    }))
+
+    if (recognitionMode !== 'native') {
+      appendVoiceDiagnostic('warn', `当前不是原生语音模式：${recognitionMode}`)
+      setVoiceDiagnostics((previous) => ({ ...previous, isRunningProbe: false }))
+      return
+    }
+
+    await SpeechRecognition.stop().catch(() => undefined)
+    await SpeechRecognition.removeAllListeners().catch(() => undefined)
+
+    let finished = false
+    const finishProbe = async (reason: string) => {
+      if (finished) {
+        return
+      }
+
+      finished = true
+      await SpeechRecognition.stop().catch(() => undefined)
+      await SpeechRecognition.removeAllListeners().catch(() => undefined)
+      setIsNativeVoiceListening(false)
+      nativeRecognitionActiveRef.current = false
+      setVoiceDiagnostics((previous) => ({ ...previous, isRunningProbe: false }))
+      appendVoiceDiagnostic('info', `监听测试结束：${reason}`)
+    }
+
+    try {
+      const permissions = await SpeechRecognition.checkPermissions()
+      setVoiceDiagnostics((previous) => ({ ...previous, permission: formatDiagnosticValue(permissions) }))
+      if (permissions.speechRecognition !== 'granted') {
+        const requested = await SpeechRecognition.requestPermissions()
+        setVoiceDiagnostics((previous) => ({ ...previous, permission: formatDiagnosticValue(requested) }))
+        if (requested.speechRecognition !== 'granted') {
+          const message = '权限未授予，系统不会把麦克风音频交给应用。'
+          setVoiceDiagnostics((previous) => ({ ...previous, lastError: message, isRunningProbe: false }))
+          appendVoiceDiagnostic('error', message)
+          return
+        }
+      }
+
+      await SpeechRecognition.addListener('partialResults', (data) => {
+        const transcript = data.matches?.find((item) => item.trim())?.trim() ?? ''
+        setVoiceDiagnostics((previous) => ({
+          ...previous,
+          lastPartial: formatDiagnosticValue(data.matches ?? []),
+          lastResult: transcript || previous.lastResult,
+        }))
+        appendVoiceDiagnostic(transcript ? 'ok' : 'info', `partialResults=${formatDiagnosticValue(data.matches ?? [])}`)
+      })
+      await SpeechRecognition.addListener('listeningState', (data) => {
+        setIsNativeVoiceListening(data.status === 'started')
+        setVoiceDiagnostics((previous) => ({
+          ...previous,
+          isNativeVoiceListening: data.status === 'started',
+        }))
+        appendVoiceDiagnostic(data.status === 'started' ? 'ok' : 'info', `listeningState=${formatDiagnosticValue(data)}`)
+      })
+
+      await SpeechRecognition.start({
+        language: 'zh-CN',
+        maxResults: 5,
+        partialResults: true,
+        popup: false,
+      })
+      nativeRecognitionActiveRef.current = true
+      setIsNativeVoiceListening(true)
+      appendVoiceDiagnostic('ok', 'SpeechRecognition.start() 已返回成功，请现在对着手机说一句话。')
+      window.setTimeout(() => {
+        void finishProbe('8 秒测试窗口结束')
+      }, 8000)
+    } catch (error) {
+      const message = `监听测试失败：${formatDiagnosticValue(error)}`
+      setVoiceDiagnostics((previous) => ({ ...previous, lastError: message, isRunningProbe: false }))
+      appendVoiceDiagnostic('error', message)
+      await finishProbe('启动失败')
+    }
+  }
+
+  useEffect(() => {
+    setVoiceDiagnostics((previous) => ({
+      ...previous,
+      isNativePlatform,
+      recognitionMode,
+      recognitionSupported,
+      voiceEnabled,
+      isNativeVoiceListening,
+    }))
+  }, [isNativePlatform, isNativeVoiceListening, recognitionMode, recognitionSupported, voiceEnabled])
 
   useEffect(() => {
     if (!selectedRecipe || screen !== 'prep') {
@@ -439,6 +667,11 @@ export function useKitchenApp() {
     }
 
     setLastVoiceCommand(interpretedTranscript)
+    setVoiceDiagnostics((previous) => ({
+      ...previous,
+      lastResult: interpretedTranscript,
+    }))
+    appendVoiceDiagnostic('ok', `交给厨房语音逻辑：${interpretedTranscript}`)
 
     const handled = handleVoiceCommand(interpretedTranscript)
     if (handled) {
@@ -594,6 +827,7 @@ export function useKitchenApp() {
       nativeRecognitionActiveRef.current = true
 
       try {
+        appendVoiceDiagnostic('info', '持续监听：调用 SpeechRecognition.start()。')
         await SpeechRecognition.start({
           language: 'zh-CN',
           maxResults: 3,
@@ -602,6 +836,7 @@ export function useKitchenApp() {
         })
         setIsNativeVoiceListening(true)
         setNotice(null)
+        appendVoiceDiagnostic('ok', '持续监听：SpeechRecognition.start() 成功。')
       } catch (error) {
         nativeRecognitionActiveRef.current = false
         setIsNativeVoiceListening(false)
@@ -619,6 +854,8 @@ export function useKitchenApp() {
                   : '语音识别启动失败，正在自动重试。'
 
         setNotice(friendlyMessage)
+        setVoiceDiagnostics((previous) => ({ ...previous, lastError: rawMessage || friendlyMessage }))
+        appendVoiceDiagnostic('error', `持续监听启动失败：${rawMessage || friendlyMessage}`)
         if (!/not available|permission|insufficient/i.test(rawMessage)) {
           queueRestart(/busy/i.test(rawMessage) ? 1800 : 2500)
         } else {
@@ -631,9 +868,15 @@ export function useKitchenApp() {
       await SpeechRecognition.stop().catch(() => undefined)
       await SpeechRecognition.removeAllListeners().catch(() => undefined)
       await SpeechRecognition.addListener('partialResults', (data) => {
+        setVoiceDiagnostics((previous) => ({
+          ...previous,
+          lastPartial: formatDiagnosticValue(data.matches ?? []),
+        }))
+        appendVoiceDiagnostic('info', `持续监听 partialResults=${formatDiagnosticValue(data.matches ?? [])}`)
         handleNativeMatches(data.matches)
       })
       await SpeechRecognition.addListener('listeningState', (data) => {
+        appendVoiceDiagnostic('info', `持续监听 listeningState=${formatDiagnosticValue(data)}`)
         if (data.status === 'started') {
           nativeRecognitionActiveRef.current = true
           setIsNativeVoiceListening(true)
@@ -866,6 +1109,7 @@ export function useKitchenApp() {
     quickPrompts,
     currentRecipeCompletions,
     voiceStatus,
+    voiceDiagnostics,
     liveCoachNote,
     setScreen,
     setSelectedRecipeId,
@@ -878,6 +1122,9 @@ export function useKitchenApp() {
     setPrepServings,
     setVoiceEnabled,
     toggleVoice,
+    refreshVoiceDiagnostics,
+    runVoiceListenProbe,
+    runTtsDiagnostic,
     disableVoice,
     setNotice,
     jumpToStep,

@@ -684,6 +684,7 @@ function App() {
               isTimerRunning={app.isTimerRunning}
               voiceEnabled={app.voiceEnabled}
               voiceStatus={app.voiceStatus}
+              voiceDiagnostics={app.voiceDiagnostics}
               lastVoiceCommand={app.lastVoiceCommand}
               wakeWords={app.wakeWords}
               liveCoachNote={app.liveCoachNote}
@@ -704,6 +705,15 @@ function App() {
               }}
               onToggleVoice={() => {
                 void app.toggleVoice()
+              }}
+              onRefreshVoiceDiagnostics={() => {
+                void app.refreshVoiceDiagnostics()
+              }}
+              onRunVoiceListenProbe={() => {
+                void app.runVoiceListenProbe()
+              }}
+              onRunTtsDiagnostic={() => {
+                void app.runTtsDiagnostic()
               }}
               onPromptClick={(question) => {
                 void app.submitAssistantQuestion(question)

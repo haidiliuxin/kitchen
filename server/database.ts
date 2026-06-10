@@ -162,6 +162,9 @@ function createTables(db: DatabaseSync): void {
       credit_url TEXT,
       start_seconds REAL,
       end_seconds REAL,
+      timeline_source TEXT,
+      timeline_confidence REAL,
+      timeline_note TEXT,
       PRIMARY KEY (recipe_id, step_index),
       FOREIGN KEY (recipe_id, step_index)
         REFERENCES steps(recipe_id, step_index)
@@ -191,6 +194,18 @@ function ensureStepVideoSegmentColumns(db: DatabaseSync): void {
 
   if (!columnNames.has('end_seconds')) {
     db.exec('ALTER TABLE step_videos ADD COLUMN end_seconds REAL')
+  }
+
+  if (!columnNames.has('timeline_source')) {
+    db.exec('ALTER TABLE step_videos ADD COLUMN timeline_source TEXT')
+  }
+
+  if (!columnNames.has('timeline_confidence')) {
+    db.exec('ALTER TABLE step_videos ADD COLUMN timeline_confidence REAL')
+  }
+
+  if (!columnNames.has('timeline_note')) {
+    db.exec('ALTER TABLE step_videos ADD COLUMN timeline_note TEXT')
   }
 }
 
@@ -339,8 +354,11 @@ function seedRecipes(db: DatabaseSync): void {
         credit_label,
         credit_url,
         start_seconds,
-        end_seconds
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        end_seconds,
+        timeline_source,
+        timeline_confidence,
+        timeline_note
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
 
     for (const recipe of recipes) {
@@ -424,6 +442,9 @@ function seedRecipes(db: DatabaseSync): void {
             step.video.creditUrl ?? null,
             step.video.startSeconds ?? null,
             step.video.endSeconds ?? null,
+            step.video.timelineSource ?? null,
+            step.video.timelineConfidence ?? null,
+            step.video.timelineNote ?? null,
           )
         }
       })

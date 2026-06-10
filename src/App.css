@@ -5144,3 +5144,127 @@ button {
 .prep-bottom-bar {
   z-index: 35;
 }
+
+.timeline-diagnostic-card {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(229, 113, 40, 0.18);
+  border-radius: 18px;
+  background: rgba(255, 247, 237, 0.78);
+  color: #7a4a2a;
+}
+
+.timeline-diagnostic-card span,
+.voice-diagnostic-grid dt {
+  color: #a45d32;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.timeline-diagnostic-card strong {
+  color: #2a2018;
+}
+
+.timeline-diagnostic-card p {
+  margin: 0;
+  color: #84664f;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.voice-diagnostic-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid rgba(122, 83, 52, 0.12);
+  border-radius: 22px;
+  background: rgba(255, 252, 247, 0.92);
+}
+
+.voice-diagnostic-head,
+.voice-diagnostic-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.voice-diagnostic-badge {
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(122, 83, 52, 0.08);
+  color: #7a4a2a;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.voice-diagnostic-badge-live {
+  background: rgba(34, 197, 94, 0.14);
+  color: #166534;
+}
+
+.voice-diagnostic-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin: 0;
+}
+
+.voice-diagnostic-grid div {
+  min-width: 0;
+  padding: 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.voice-diagnostic-grid dd {
+  overflow-wrap: anywhere;
+  margin: 4px 0 0;
+  color: #3a2b20;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.voice-diagnostic-log {
+  display: grid;
+  gap: 6px;
+  max-height: 180px;
+  overflow: auto;
+  padding: 10px;
+  border-radius: 16px;
+  background: rgba(42, 32, 24, 0.04);
+}
+
+.voice-diagnostic-log p {
+  margin: 0;
+  color: #80634c;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.voice-diagnostic-entry {
+  overflow-wrap: anywhere;
+}
+
+.voice-diagnostic-entry span {
+  margin-right: 8px;
+  color: #9a7a61;
+  font-weight: 800;
+}
+
+.voice-diagnostic-entry-ok {
+  color: #166534 !important;
+}
+
+.voice-diagnostic-entry-warn {
+  color: #92400e !important;
+}
+
+.voice-diagnostic-entry-error {
+  color: #991b1b !important;
+}

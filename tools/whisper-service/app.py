@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -135,27 +136,129 @@ def get_whisper_model():
 
 def fetch_video_metadata(url: str) -> dict[str, Any]:
     yt_dlp_binary = resolve_yt_dlp_binary()
-    output = run_command_with_retries(
-        [
-            yt_dlp_binary,
-            url,
-            "--skip-download",
-            "--no-warnings",
-            "--simulate",
-            "--dump-single-json",
-            "--write-auto-subs",
-            "--write-subs",
-            "--sub-langs",
-            "zh-Hans,zh-CN,zh.*,en.*",
-            "--user-agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0 Safari/537.36",
-            "--referer",
-            "https://www.bilibili.com/" if "bilibili.com" in url else url,
-            "--add-header",
-            "Accept-Language:zh-CN,zh;q=0.9,en;q=0.8",
-        ]
+    try:
+        output = run_command_with_retries(
+            [
+                yt_dlp_binary,
+                url,
+                "--skip-download",
+                "--no-warnings",
+                "--simulate",
+                "--dump-single-json",
+                "--write-auto-subs",
+                "--write-subs",
+                "--sub-langs",
+                "zh-Hans,zh-CN,zh.*,en.*",
+                "--user-agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0 Safari/537.36",
+                "--referer",
+                "https://www.bilibili.com/" if "bilibili.com" in url else url,
+                "--add-header",
+                "Accept-Language:zh-CN,zh;q=0.9,en;q=0.8",
+            ]
+        )
+        return json.loads(output)
+    except Exception:
+        if "bilibili.com" in url:
+            return fetch_bilibili_metadata_from_page(url)
+        raise
+
+
+def fetch_url_text(url: str, referer: str = "") -> str:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0 Safari/537.36",
+            "Referer": referer or url,
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        },
     )
-    return json.loads(output)
+    with urllib.request.urlopen(request, timeout=25) as response:
+        return response.read().decode("utf-8", errors="ignore")
+
+
+def fetch_bilibili_metadata_from_page(url: str) -> dict[str, Any]:
+    html = fetch_url_text(url, "https://www.bilibili.com/")
+    aid_match = re.search(r'"aid"\s*:\s*(\d+)', html)
+    cid_match = re.search(r'"cid"\s*:\s*(\d+)', html)
+    title_match = re.search(r'"title"\s*:\s*"([^"]+)"', html)
+    description_match = re.search(r'"desc"\s*:\s*"([^"]*)"', html)
+
+    if not aid_match or not cid_match:
+        view_payload = fetch_bilibili_view_metadata(url)
+        aid = view_payload.get("aid")
+        cid = view_payload.get("cid")
+        if not aid or not cid:
+            raise RuntimeError("Bilibili page fallback could not locate aid/cid.")
+        title = str(view_payload.get("title") or "")
+        description = str(view_payload.get("desc") or "")
+    else:
+        aid = aid_match.group(1)
+        cid = cid_match.group(1)
+        title = json.loads(f'"{title_match.group(1)}"') if title_match else ""
+        description = json.loads(f'"{description_match.group(1)}"') if description_match else ""
+
+    playurl = (
+        "https://api.bilibili.com/x/player/playurl"
+        f"?avid={aid}&cid={cid}&qn=80&fnval=16&fourk=1"
+    )
+    payload = json.loads(fetch_url_text(playurl, url))
+    if payload.get("code") != 0:
+        raise RuntimeError(f"Bilibili playurl fallback failed: {payload.get('message') or payload.get('code')}")
+
+    audio_items = (((payload.get("data") or {}).get("dash") or {}).get("audio") or [])
+    formats = []
+    for item in audio_items:
+        if not isinstance(item, dict):
+            continue
+        audio_url = item.get("baseUrl") or item.get("base_url")
+        if isinstance(audio_url, str) and audio_url.strip():
+            formats.append(
+                {
+                    "url": audio_url.strip(),
+                    "ext": "m4s",
+                    "acodec": item.get("codecs") or "mp4a",
+                    "vcodec": "none",
+                    "http_headers": {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0 Safari/537.36",
+                        "Referer": url,
+                        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                    },
+                }
+            )
+
+    if not formats:
+        raise RuntimeError("Bilibili playurl fallback did not return audio formats.")
+
+    return {
+        "title": title,
+        "description": description,
+        "formats": formats,
+        "extractor_key": "BiliBiliPageFallback",
+    }
+
+
+def fetch_bilibili_view_metadata(url: str) -> dict[str, Any]:
+    bvid_match = re.search(r"(BV[a-zA-Z0-9]+)", url)
+    if not bvid_match:
+        return {}
+
+    api_url = f"https://api.bilibili.com/x/web-interface/view?bvid={bvid_match.group(1)}"
+    payload = json.loads(fetch_url_text(api_url, "https://www.bilibili.com/"))
+    if payload.get("code") != 0 or not isinstance(payload.get("data"), dict):
+        return {}
+
+    data = payload["data"]
+    pages = data.get("pages") if isinstance(data.get("pages"), list) else []
+    first_page = pages[0] if pages and isinstance(pages[0], dict) else {}
+    cid = first_page.get("cid") or data.get("cid")
+
+    return {
+        "aid": data.get("aid"),
+        "cid": cid,
+        "title": data.get("title"),
+        "desc": data.get("desc"),
+    }
 
 
 def pick_audio_download(metadata: dict[str, Any]) -> tuple[str, str, dict[str, str]]:
@@ -218,6 +321,18 @@ def download_audio_track(url: str, workdir: Path) -> Path:
 
     if not target_path.exists():
         raise RuntimeError("Audio stream download failed.")
+    return target_path
+
+
+def download_audio_from_metadata(metadata: dict[str, Any], workdir: Path) -> Path:
+    stream_url, extension, headers = pick_audio_download(metadata)
+    target_path = workdir / f"metadata-audio.{extension}"
+    request = urllib.request.Request(stream_url, headers=headers)
+    with urllib.request.urlopen(request) as response, open(target_path, "wb") as file:
+        shutil.copyfileobj(response, file)
+
+    if not target_path.exists():
+        raise RuntimeError("Audio stream download from metadata failed.")
     return target_path
 
 
@@ -372,6 +487,9 @@ def is_low_quality_transcript(
     if not cleaned:
         return True
 
+    if contains_cjk(cleaned) and len(cleaned) >= 80:
+        return False
+
     tokens = [token for token in cleaned.replace("，", " ").replace("。", " ").split() if token]
     if len(cleaned) < 24 or len(tokens) <= 3:
         return True
@@ -430,7 +548,7 @@ def transcribe(request: TranscribeRequest):
         media_path = (
             download_direct_media(request.mediaUrl.strip(), temp_root, request.url.strip())
             if request.mediaUrl and request.mediaUrl.strip()
-            else download_audio_track(request.url.strip(), temp_root)
+            else download_audio_from_metadata(metadata, temp_root)
         )
         audio_path = extract_audio_for_whisper(media_path, temp_root)
         transcript, language, segments = transcribe_audio_file(audio_path)

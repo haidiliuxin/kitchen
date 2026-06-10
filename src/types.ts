@@ -21,6 +21,14 @@ export type Substitution = {
   tip: string
 }
 
+export type StepVideoTimelineSource =
+  | 'model'
+  | 'evidence'
+  | 'transcript-match'
+  | 'chapter-match'
+  | 'sequential-transcript'
+  | 'none'
+
 export type StepVideo = {
   url: string
   posterUrl?: string
@@ -29,6 +37,9 @@ export type StepVideo = {
   creditUrl?: string
   startSeconds?: number
   endSeconds?: number
+  timelineSource?: StepVideoTimelineSource
+  timelineConfidence?: number
+  timelineNote?: string
 }
 
 export type Step = {

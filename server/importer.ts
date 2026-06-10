@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync }
 import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import type { Recipe, Step } from '../src/types.js'
+import type { Recipe, Step, StepVideoTimelineSource } from '../src/types.js'
 import { callChatCompletion, getLlmRuntimeInfo, isLlmConfigured, type LlmProvider } from './llm.js'
 
 const requestTimeoutMs = Number(
@@ -2342,6 +2342,11 @@ function buildSourceStepVideo(
   source: FetchableSource,
   caption = '原始攻略链接',
   segment?: { startSeconds: number; endSeconds: number },
+  timeline?: {
+    source?: StepVideoTimelineSource
+    confidence?: number
+    note?: string
+  },
 ): NonNullable<Step['video']> {
   return {
     url: getPlayableSourceUrl(source),
@@ -2350,6 +2355,9 @@ function buildSourceStepVideo(
     creditUrl: source.url,
     startSeconds: segment?.startSeconds,
     endSeconds: segment?.endSeconds,
+    timelineSource: timeline?.source,
+    timelineConfidence: timeline?.confidence,
+    timelineNote: timeline?.note,
   }
 }
 
@@ -2486,7 +2494,7 @@ function findBestTranscriptSegmentForStep(
     }
   }
 
-  return best && best.score >= 0.34 ? best : null
+  return best && best.score >= 0.26 ? best : null
 }
 
 function findBestChapterSegmentForStep(
@@ -2525,7 +2533,7 @@ function findBestChapterSegmentForStep(
     .sort((left, right) => right.score - left.score)
 
   const best = candidates[0]
-  return best && best.score >= 0.42 ? best : null
+  return best && best.score >= 0.3 ? best : null
 }
 
 function findEvidenceSegmentForStep(
@@ -2587,7 +2595,7 @@ function findEvidenceSegmentForStep(
     .sort((left, right) => right.score - left.score)
 
   const best = candidates[0]
-  return best && best.score >= 0.38 ? best : null
+  return best && best.score >= 0.3 ? best : null
 }
 
 function getSequentialTranscriptWindow(
@@ -2625,6 +2633,14 @@ function getSequentialTranscriptWindow(
   }
 }
 
+type TimelineMatch = {
+  startSeconds: number
+  endSeconds: number
+  score: number
+  source: StepVideoTimelineSource
+  note: string
+}
+
 function applyReliableVideoTimeline(
   recipe: Recipe,
   source: FetchableSource,
@@ -2646,7 +2662,19 @@ function applyReliableVideoTimeline(
       existingEnd > existingStart
     ) {
       cursorSeconds = existingEnd
-      return step
+      return {
+        ...step,
+        video: step.video
+          ? {
+              ...step.video,
+              timelineSource: step.video.timelineSource ?? 'model',
+              timelineConfidence: step.video.timelineConfidence ?? 0.75,
+              timelineNote:
+                step.video.timelineNote ??
+                `模型直接给出了时间段；字幕片段 ${source.transcriptSegments.length} 段，章节 ${source.timelineChapters.length} 段。`,
+            }
+          : step.video,
+      }
     }
 
     const evidenceMatch = findEvidenceSegmentForStep(step, evidence, stepIndex, cursorSeconds)
@@ -2659,14 +2687,57 @@ function applyReliableVideoTimeline(
     const sequentialTranscriptMatch = !evidenceMatch && !transcriptMatch && !chapterMatch
       ? getSequentialTranscriptWindow(source.transcriptSegments, stepIndex, recipe.steps.length)
       : null
-    const match = evidenceMatch ?? transcriptMatch ?? chapterMatch ?? sequentialTranscriptMatch
+    const match: TimelineMatch | null = evidenceMatch
+      ? {
+          ...evidenceMatch,
+          source: 'evidence',
+          note: `来自结构化步骤证据；字幕片段 ${source.transcriptSegments.length} 段，章节 ${source.timelineChapters.length} 段。`,
+        }
+      : transcriptMatch
+        ? {
+            ...transcriptMatch,
+            source: 'transcript-match',
+            note: `根据步骤关键词匹配字幕窗口；字幕片段 ${source.transcriptSegments.length} 段，匹配分 ${transcriptMatch.score.toFixed(2)}。`,
+          }
+        : chapterMatch
+          ? {
+              ...chapterMatch,
+              source: 'chapter-match',
+              note: `根据视频章节标题匹配；章节 ${source.timelineChapters.length} 段，匹配分 ${chapterMatch.score.toFixed(2)}。`,
+            }
+          : sequentialTranscriptMatch
+            ? {
+                ...sequentialTranscriptMatch,
+                source: 'sequential-transcript',
+                note: `没有匹配到明确关键词，按字幕顺序均分兜底；字幕片段 ${source.transcriptSegments.length} 段。`,
+              }
+            : null
 
     if (!match) {
-      return step
+      return {
+        ...step,
+        video: step.video
+          ? {
+              ...step.video,
+              timelineSource: step.video.timelineSource ?? 'none',
+              timelineConfidence: step.video.timelineConfidence ?? 0,
+              timelineNote:
+                step.video.timelineNote ??
+                `未取得可用时间戳：字幕片段 ${source.transcriptSegments.length} 段，章节 ${source.timelineChapters.length} 段，结构化证据 ${evidence?.timeline.length ?? 0} 步。`,
+            }
+          : buildSourceStepVideo(source, '原始攻略链接 · 未取得可靠时间轴', undefined, {
+              source: 'none',
+              confidence: 0,
+              note: `未取得可用时间戳：字幕片段 ${source.transcriptSegments.length} 段，章节 ${source.timelineChapters.length} 段，结构化证据 ${evidence?.timeline.length ?? 0} 步。`,
+            }),
+      }
     }
 
     cursorSeconds = match.endSeconds
-    const captionSuffix = sequentialTranscriptMatch === match ? ' · 已按字幕顺序匹配时间轴' : ' · 已匹配可靠时间轴'
+    const captionSuffix =
+      match.source === 'sequential-transcript'
+        ? ' · 字幕顺序兜底时间轴'
+        : ' · 已匹配可靠时间轴'
     return {
       ...step,
       video: buildSourceStepVideo(
@@ -2675,6 +2746,11 @@ function applyReliableVideoTimeline(
         {
           startSeconds: Math.round(match.startSeconds * 10) / 10,
           endSeconds: Math.round(match.endSeconds * 10) / 10,
+        },
+        {
+          source: match.source,
+          confidence: Math.round(Math.min(1, Math.max(0, match.score)) * 100) / 100,
+          note: match.note,
         },
       ),
     }
@@ -2780,6 +2856,18 @@ function normalizeStep(step: unknown, index: number, source: FetchableSource): S
             rawStartSeconds !== undefined && rawEndSeconds !== undefined && rawEndSeconds > rawStartSeconds
               ? rawEndSeconds
               : fallbackVideo.endSeconds,
+          timelineSource:
+            rawStartSeconds !== undefined && rawEndSeconds !== undefined && rawEndSeconds > rawStartSeconds
+              ? 'model'
+              : fallbackVideo.timelineSource,
+          timelineConfidence:
+            rawStartSeconds !== undefined && rawEndSeconds !== undefined && rawEndSeconds > rawStartSeconds
+              ? 0.72
+              : fallbackVideo.timelineConfidence,
+          timelineNote:
+            rawStartSeconds !== undefined && rawEndSeconds !== undefined && rawEndSeconds > rawStartSeconds
+              ? `模型直接给出了时间段；字幕片段 ${source.transcriptSegments.length} 段，章节 ${source.timelineChapters.length} 段。`
+              : fallbackVideo.timelineNote,
         }
       : fallbackVideo,
   }

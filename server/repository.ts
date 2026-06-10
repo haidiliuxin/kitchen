@@ -8,6 +8,7 @@ import type {
   Recipe,
   RecipeFilters,
   RecipeSourceType,
+  StepVideoTimelineSource,
   RecipeVisibility,
 } from '../src/types.js'
 
@@ -48,6 +49,9 @@ type StepVideoRow = {
   credit_url: string | null
   start_seconds: number | null
   end_seconds: number | null
+  timeline_source: StepVideoTimelineSource | null
+  timeline_confidence: number | null
+  timeline_note: string | null
 }
 
 type TextValueRow = {
@@ -163,7 +167,17 @@ function assembleRecipe(db: DatabaseSync, row: RecipeRow): Recipe {
       ...(function () {
         const videoRow = db
           .prepare(`
-            SELECT video_url, poster_url, caption, credit_label, credit_url, start_seconds, end_seconds
+            SELECT
+              video_url,
+              poster_url,
+              caption,
+              credit_label,
+              credit_url,
+              start_seconds,
+              end_seconds,
+              timeline_source,
+              timeline_confidence,
+              timeline_note
             FROM step_videos
             WHERE recipe_id = ? AND step_index = ?
           `)
@@ -179,6 +193,9 @@ function assembleRecipe(db: DatabaseSync, row: RecipeRow): Recipe {
                 creditUrl: videoRow.credit_url ?? undefined,
                 startSeconds: videoRow.start_seconds ?? undefined,
                 endSeconds: videoRow.end_seconds ?? undefined,
+                timelineSource: videoRow.timeline_source ?? undefined,
+                timelineConfidence: videoRow.timeline_confidence ?? undefined,
+                timelineNote: videoRow.timeline_note ?? undefined,
               }
             : undefined,
         }
@@ -548,8 +565,11 @@ export function saveImportedRecipe(
         credit_label,
         credit_url,
         start_seconds,
-        end_seconds
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        end_seconds,
+        timeline_source,
+        timeline_confidence,
+        timeline_note
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
 
     recipe.steps.forEach((step, stepIndex) => {
@@ -585,6 +605,9 @@ export function saveImportedRecipe(
           step.video.creditUrl ?? null,
           step.video.startSeconds ?? null,
           step.video.endSeconds ?? null,
+          step.video.timelineSource ?? null,
+          step.video.timelineConfidence ?? null,
+          step.video.timelineNote ?? null,
         )
       }
     })

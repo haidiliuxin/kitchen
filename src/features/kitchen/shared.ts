@@ -15,6 +15,30 @@ export type ChatMessage = {
 
 export type VoiceStatus = 'idle' | 'listening' | 'unsupported'
 
+export type VoiceDiagnosticEntry = {
+  id: string
+  at: string
+  level: 'info' | 'ok' | 'warn' | 'error'
+  message: string
+}
+
+export type VoiceDiagnostics = {
+  isNativePlatform: boolean
+  recognitionMode: 'native' | 'web' | 'none'
+  recognitionSupported: boolean
+  voiceEnabled: boolean
+  isNativeVoiceListening: boolean
+  permission: string
+  available: string
+  supportedLanguages: string
+  lastPartial: string
+  lastResult: string
+  lastError: string
+  ttsStatus: string
+  isRunningProbe: boolean
+  logs: VoiceDiagnosticEntry[]
+}
+
 export const difficultyOptions: Array<'全部' | Difficulty> = [
   '全部',
   '零失败',

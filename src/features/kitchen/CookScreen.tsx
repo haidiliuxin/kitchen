@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { formatTimer, speak } from './shared.js'
-import type { Recipe, Step } from '../../types.js'
-import type { ChatMessage, VoiceStatus } from './shared.js'
+import type { Recipe, Step, StepVideoTimelineSource } from '../../types.js'
+import type { ChatMessage, VoiceDiagnostics, VoiceStatus } from './shared.js'
 import { buildMediaProxyUrl } from '../../lib/api.js'
 
 type CookScreenProps = {
@@ -12,6 +12,7 @@ type CookScreenProps = {
   isTimerRunning: boolean
   voiceEnabled: boolean
   voiceStatus: VoiceStatus
+  voiceDiagnostics: VoiceDiagnostics
   lastVoiceCommand: string
   wakeWords: string[]
   liveCoachNote: string
@@ -25,6 +26,9 @@ type CookScreenProps = {
   onToggleTimer: () => void
   onResetTimer: () => void
   onToggleVoice: () => void
+  onRefreshVoiceDiagnostics: () => void
+  onRunVoiceListenProbe: () => void
+  onRunTtsDiagnostic: () => void
   onPromptClick: (question: string) => void
   onAssistantInputChange: (value: string) => void
   onAssistantSubmit: () => void
@@ -176,6 +180,25 @@ function getStepVideoSegment(recipe: Recipe, stepIndex: number): StepVideoSegmen
   return undefined
 }
 
+function getTimelineSourceLabel(source: StepVideoTimelineSource | undefined): string {
+  switch (source) {
+    case 'model':
+      return '模型直接给出'
+    case 'evidence':
+      return '结构化证据'
+    case 'transcript-match':
+      return '字幕关键词匹配'
+    case 'chapter-match':
+      return '视频章节匹配'
+    case 'sequential-transcript':
+      return '字幕顺序兜底'
+    case 'none':
+      return '未取得时间轴'
+    default:
+      return '未标注来源'
+  }
+}
+
 export function CookScreen({
   selectedRecipe,
   currentStep,
@@ -184,6 +207,7 @@ export function CookScreen({
   isTimerRunning,
   voiceEnabled,
   voiceStatus,
+  voiceDiagnostics,
   lastVoiceCommand,
   wakeWords,
   liveCoachNote,
@@ -197,6 +221,9 @@ export function CookScreen({
   onToggleTimer,
   onResetTimer,
   onToggleVoice,
+  onRefreshVoiceDiagnostics,
+  onRunVoiceListenProbe,
+  onRunTtsDiagnostic,
   onPromptClick,
   onAssistantInputChange,
   onAssistantSubmit,
@@ -206,6 +233,10 @@ export function CookScreen({
   const [offlineFrameIndex, setOfflineFrameIndex] = useState(0)
   const mediaUrl = currentStep.video?.url ?? ''
   const stepVideoSegment = getStepVideoSegment(selectedRecipe, currentStepIndex)
+  const timelineConfidencePercent =
+    typeof currentStep.video?.timelineConfidence === 'number'
+      ? `${Math.round(currentStep.video.timelineConfidence * 100)}%`
+      : '未知'
   const stepMedia = resolveStepMedia(mediaUrl, stepVideoSegment)
   const playableStepMedia =
     stepMedia.kind === 'video' && shouldProxyVideoUrl(stepMedia.url)
@@ -437,6 +468,18 @@ export function CookScreen({
                   暂无可靠时间轴：先播放完整原视频，对照当前步骤看关键动作。
                 </p>
               )}
+              {playableStepMedia.kind !== 'image' && (
+                <div className="timeline-diagnostic-card">
+                  <span>时间轴诊断</span>
+                  <strong>
+                    {getTimelineSourceLabel(currentStep.video.timelineSource)} · 置信度 {timelineConfidencePercent}
+                  </strong>
+                  <p>
+                    {currentStep.video.timelineNote ??
+                      '这个旧菜谱没有保存时间轴诊断信息。建议重新导入一次视频，生成新版诊断。'}
+                  </p>
+                </div>
+              )}
               <p className="step-video-caption">{currentStep.video.caption}</p>
               {currentStep.video.creditUrl && (
                 <a className="video-credit-link" href={currentStep.video.creditUrl} target="_blank" rel="noreferrer">
@@ -518,6 +561,74 @@ export function CookScreen({
               <strong>{lastVoiceCommand}</strong>
             </div>
           )}
+          <div className="voice-diagnostic-panel">
+            <div className="voice-diagnostic-head">
+              <div>
+                <span className="section-kicker">测试版诊断</span>
+                <strong>语音服务状态</strong>
+              </div>
+              <span className={`voice-diagnostic-badge ${voiceDiagnostics.isRunningProbe ? 'voice-diagnostic-badge-live' : ''}`}>
+                {voiceDiagnostics.isRunningProbe ? '测试中' : '待命'}
+              </span>
+            </div>
+            <div className="voice-diagnostic-actions">
+              <button className="ghost-button small-button" onClick={onRefreshVoiceDiagnostics}>
+                刷新状态
+              </button>
+              <button className="ghost-button small-button" onClick={onRunVoiceListenProbe} disabled={voiceDiagnostics.isRunningProbe}>
+                测试监听 8 秒
+              </button>
+              <button className="ghost-button small-button" onClick={onRunTtsDiagnostic}>
+                测试朗读
+              </button>
+            </div>
+            <dl className="voice-diagnostic-grid">
+              <div>
+                <dt>运行环境</dt>
+                <dd>{voiceDiagnostics.isNativePlatform ? 'Android 原生' : '浏览器'}</dd>
+              </div>
+              <div>
+                <dt>识别模式</dt>
+                <dd>{voiceDiagnostics.recognitionMode}</dd>
+              </div>
+              <div>
+                <dt>权限</dt>
+                <dd>{voiceDiagnostics.permission}</dd>
+              </div>
+              <div>
+                <dt>available</dt>
+                <dd>{voiceDiagnostics.available}</dd>
+              </div>
+              <div>
+                <dt>语言</dt>
+                <dd>{voiceDiagnostics.supportedLanguages}</dd>
+              </div>
+              <div>
+                <dt>TTS</dt>
+                <dd>{voiceDiagnostics.ttsStatus}</dd>
+              </div>
+              <div>
+                <dt>最近 partial</dt>
+                <dd>{voiceDiagnostics.lastPartial || '暂无'}</dd>
+              </div>
+              <div>
+                <dt>最近错误</dt>
+                <dd>{voiceDiagnostics.lastError || '暂无'}</dd>
+              </div>
+            </dl>
+            <div className="voice-diagnostic-log" aria-live="polite">
+              {voiceDiagnostics.logs.length === 0 ? (
+                <p>还没有诊断日志。先点“刷新状态”或“测试监听 8 秒”。</p>
+              ) : (
+                voiceDiagnostics.logs.map((entry) => (
+                  <p key={entry.id} className={`voice-diagnostic-entry voice-diagnostic-entry-${entry.level}`}>
+                    <span>{entry.at}</span>
+                    {entry.message}
+                  </p>
+                ))
+              )}
+            </div>
+          </div>
         </section>
 
         <section className="prompt-panel">
