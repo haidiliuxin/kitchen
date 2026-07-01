@@ -176,6 +176,10 @@ export function useKitchenApp() {
     : 0
 
   const formatDiagnosticValue = (value: unknown): string => {
+    if (value instanceof Error) {
+      return value.message
+    }
+
     if (typeof value === 'string') {
       return value
     }
@@ -184,6 +188,28 @@ export function useKitchenApp() {
       return JSON.stringify(value)
     } catch {
       return String(value)
+    }
+  }
+
+  const withDiagnosticTimeout = async <T,>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    label: string,
+  ): Promise<T> => {
+    let timeoutId: number | undefined
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = window.setTimeout(() => {
+        reject(new Error(`${label} 超过 ${Math.round(timeoutMs / 1000)} 秒没有返回`))
+      }, timeoutMs)
+    })
+
+    try {
+      return await Promise.race([promise, timeoutPromise])
+    } finally {
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId)
+      }
     }
   }
 
@@ -308,12 +334,16 @@ export function useKitchenApp() {
     await SpeechRecognition.removeAllListeners().catch(() => undefined)
 
     let finished = false
+    let watchdogId: number | undefined
     const finishProbe = async (reason: string) => {
       if (finished) {
         return
       }
 
       finished = true
+      if (watchdogId !== undefined) {
+        window.clearTimeout(watchdogId)
+      }
       await SpeechRecognition.stop().catch(() => undefined)
       await SpeechRecognition.removeAllListeners().catch(() => undefined)
       setIsNativeVoiceListening(false)
@@ -323,10 +353,26 @@ export function useKitchenApp() {
     }
 
     try {
-      const permissions = await SpeechRecognition.checkPermissions()
+      watchdogId = window.setTimeout(() => {
+        const message = '监听测试总超时：系统语音服务没有返回识别结果或结束事件。'
+        setVoiceDiagnostics((previous) => ({ ...previous, lastError: message }))
+        appendVoiceDiagnostic('warn', message)
+        void finishProbe('10 秒总超时')
+      }, 10000)
+
+      const permissions = await withDiagnosticTimeout(
+        SpeechRecognition.checkPermissions(),
+        3000,
+        'checkPermissions()',
+      )
       setVoiceDiagnostics((previous) => ({ ...previous, permission: formatDiagnosticValue(permissions) }))
       if (permissions.speechRecognition !== 'granted') {
-        const requested = await SpeechRecognition.requestPermissions()
+        appendVoiceDiagnostic('info', '准备请求麦克风/语音识别权限。')
+        const requested = await withDiagnosticTimeout(
+          SpeechRecognition.requestPermissions(),
+          8000,
+          'requestPermissions()',
+        )
         setVoiceDiagnostics((previous) => ({ ...previous, permission: formatDiagnosticValue(requested) }))
         if (requested.speechRecognition !== 'granted') {
           const message = '权限未授予，系统不会把麦克风音频交给应用。'
@@ -354,12 +400,17 @@ export function useKitchenApp() {
         appendVoiceDiagnostic(data.status === 'started' ? 'ok' : 'info', `listeningState=${formatDiagnosticValue(data)}`)
       })
 
-      await SpeechRecognition.start({
-        language: 'zh-CN',
-        maxResults: 5,
-        partialResults: true,
-        popup: false,
-      })
+      appendVoiceDiagnostic('info', '准备调用 SpeechRecognition.start()，如果系统麦克风被拉起，状态栏应出现麦克风提示。')
+      await withDiagnosticTimeout(
+        SpeechRecognition.start({
+          language: 'zh-CN',
+          maxResults: 5,
+          partialResults: true,
+          popup: false,
+        }),
+        5000,
+        'SpeechRecognition.start()',
+      )
       nativeRecognitionActiveRef.current = true
       setIsNativeVoiceListening(true)
       appendVoiceDiagnostic('ok', 'SpeechRecognition.start() 已返回成功，请现在对着手机说一句话。')
