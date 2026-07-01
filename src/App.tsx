@@ -712,6 +712,9 @@ function App() {
               onRunVoiceListenProbe={() => {
                 void app.runVoiceListenProbe()
               }}
+              onRunVoicePopupProbe={() => {
+                void app.runVoicePopupProbe()
+              }}
               onRunTtsDiagnostic={() => {
                 void app.runTtsDiagnostic()
               }}

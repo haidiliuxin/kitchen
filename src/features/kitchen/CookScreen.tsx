@@ -28,6 +28,7 @@ type CookScreenProps = {
   onToggleVoice: () => void
   onRefreshVoiceDiagnostics: () => void
   onRunVoiceListenProbe: () => void
+  onRunVoicePopupProbe: () => void
   onRunTtsDiagnostic: () => void
   onPromptClick: (question: string) => void
   onAssistantInputChange: (value: string) => void
@@ -223,6 +224,7 @@ export function CookScreen({
   onToggleVoice,
   onRefreshVoiceDiagnostics,
   onRunVoiceListenProbe,
+  onRunVoicePopupProbe,
   onRunTtsDiagnostic,
   onPromptClick,
   onAssistantInputChange,
@@ -577,6 +579,9 @@ export function CookScreen({
               </button>
               <button className="ghost-button small-button" onClick={onRunVoiceListenProbe} disabled={voiceDiagnostics.isRunningProbe}>
                 测试监听 8 秒
+              </button>
+              <button className="ghost-button small-button" onClick={onRunVoicePopupProbe} disabled={voiceDiagnostics.isRunningProbe}>
+                系统弹窗测试
               </button>
               <button className="ghost-button small-button" onClick={onRunTtsDiagnostic}>
                 测试朗读

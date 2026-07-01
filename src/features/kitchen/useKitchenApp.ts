@@ -263,7 +263,7 @@ export function useKitchenApp() {
         next.supportedLanguages = formatDiagnosticValue(languages)
       } catch (error) {
         next.supportedLanguages = `getSupportedLanguages() 失败：${formatDiagnosticValue(error)}`
-        next.lastError = next.supportedLanguages
+        appendVoiceDiagnostic('warn', '系统没有返回语言列表；这不一定代表不能识别，后续以 start() 和识别结果为准。')
       }
     } else {
       next.available = webRecognitionSupported ? 'Web Speech API 可用' : 'Web Speech API 不可用'
@@ -422,6 +422,89 @@ export function useKitchenApp() {
       setVoiceDiagnostics((previous) => ({ ...previous, lastError: message, isRunningProbe: false }))
       appendVoiceDiagnostic('error', message)
       await finishProbe('启动失败')
+    }
+  }
+
+  const runVoicePopupProbe = async () => {
+    appendVoiceDiagnostic('info', '开始系统弹窗语音识别测试。')
+    setVoiceEnabled(false)
+    setVoiceDiagnostics((previous) => ({
+      ...previous,
+      isRunningProbe: true,
+      lastPartial: '',
+      lastResult: '',
+      lastError: '',
+    }))
+
+    if (recognitionMode !== 'native') {
+      const message = `当前不是 Android 原生语音模式：${recognitionMode}`
+      setVoiceDiagnostics((previous) => ({ ...previous, isRunningProbe: false, lastError: message }))
+      appendVoiceDiagnostic('warn', message)
+      return
+    }
+
+    try {
+      await SpeechRecognition.stop().catch(() => undefined)
+      await SpeechRecognition.removeAllListeners().catch(() => undefined)
+
+      const permissions = await withDiagnosticTimeout(
+        SpeechRecognition.checkPermissions(),
+        3000,
+        'checkPermissions()',
+      )
+      setVoiceDiagnostics((previous) => ({ ...previous, permission: formatDiagnosticValue(permissions) }))
+
+      if (permissions.speechRecognition !== 'granted') {
+        appendVoiceDiagnostic('info', `当前权限为 ${permissions.speechRecognition}，准备请求系统授权。`)
+        const requested = await withDiagnosticTimeout(
+          SpeechRecognition.requestPermissions(),
+          10000,
+          'requestPermissions()',
+        )
+        setVoiceDiagnostics((previous) => ({ ...previous, permission: formatDiagnosticValue(requested) }))
+
+        if (requested.speechRecognition !== 'granted') {
+          const message = `权限仍不是 granted，而是 ${requested.speechRecognition}。请到系统设置里允许“小白下厨”使用麦克风。`
+          setVoiceDiagnostics((previous) => ({ ...previous, isRunningProbe: false, lastError: message }))
+          appendVoiceDiagnostic('error', message)
+          return
+        }
+      }
+
+      appendVoiceDiagnostic('info', '准备打开 Android 系统语音识别弹窗。请在弹窗里说一句“下一步”。')
+      const result = await withDiagnosticTimeout(
+        SpeechRecognition.start({
+          language: 'zh-CN',
+          maxResults: 5,
+          partialResults: false,
+          popup: true,
+          prompt: '请说：下一步',
+        }),
+        20000,
+        '系统弹窗 SpeechRecognition.start()',
+      )
+      const matches = (result as { matches?: string[] }).matches ?? []
+      const transcript = matches.find((item) => item.trim())?.trim() ?? ''
+      setVoiceDiagnostics((previous) => ({
+        ...previous,
+        isRunningProbe: false,
+        lastPartial: formatDiagnosticValue(matches),
+        lastResult: transcript,
+        lastError: transcript ? '' : '系统弹窗返回了结果，但没有识别到文字。',
+      }))
+      appendVoiceDiagnostic(transcript ? 'ok' : 'warn', `系统弹窗识别结果=${formatDiagnosticValue(result)}`)
+      if (transcript) {
+        await handleSpokenInput(transcript)
+      }
+    } catch (error) {
+      const message = `系统弹窗测试失败：${formatDiagnosticValue(error)}`
+      setVoiceDiagnostics((previous) => ({ ...previous, isRunningProbe: false, lastError: message }))
+      appendVoiceDiagnostic('error', message)
+    } finally {
+      await SpeechRecognition.stop().catch(() => undefined)
+      await SpeechRecognition.removeAllListeners().catch(() => undefined)
+      setIsNativeVoiceListening(false)
+      nativeRecognitionActiveRef.current = false
     }
   }
 
@@ -1175,6 +1258,7 @@ export function useKitchenApp() {
     toggleVoice,
     refreshVoiceDiagnostics,
     runVoiceListenProbe,
+    runVoicePopupProbe,
     runTtsDiagnostic,
     disableVoice,
     setNotice,
