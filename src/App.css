@@ -4,6 +4,259 @@
   padding: 24px 0 40px;
 }
 
+.demo-flow {
+  width: min(100%, 1120px);
+  margin: 0 auto;
+  padding: 18px 16px 104px;
+}
+
+.demo-landing {
+  min-height: 100vh;
+  display: grid;
+  align-content: center;
+  gap: 16px;
+}
+
+.demo-hero-panel {
+  overflow: hidden;
+}
+
+.demo-hero-panel h1 {
+  margin: 0;
+}
+
+.demo-action-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.demo-wide-button {
+  width: 100%;
+  justify-content: center;
+}
+
+.demo-muted-copy {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.demo-warning-copy {
+  margin: 0;
+  color: #9a3412;
+  line-height: 1.6;
+  font-weight: 700;
+}
+
+.demo-compact-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.demo-compact-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(146, 64, 14, 0.12);
+}
+
+.demo-compact-list span {
+  color: var(--muted);
+  text-align: right;
+}
+
+.demo-step-overview {
+  display: grid;
+  gap: 12px;
+}
+
+.demo-step-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid rgba(251, 146, 60, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 247, 237, 0.72);
+}
+
+.demo-step-card span,
+.demo-step-card p {
+  color: var(--muted);
+}
+
+.demo-step-card p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.demo-prep-item > span {
+  display: grid;
+  gap: 4px;
+}
+
+.demo-cook-layout {
+  padding-bottom: 32px;
+}
+
+.demo-offline-player {
+  margin-bottom: 16px;
+}
+
+.demo-prompt-panel {
+  margin-top: 14px;
+}
+
+.demo-voice-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.demo-voice-panel .voice-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.demo-voice-panel h3 {
+  margin: 0;
+  color: var(--text-strong);
+}
+
+.demo-voice-panel .voice-toggle {
+  min-width: 118px;
+  justify-content: center;
+}
+
+.voice-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  background: rgba(148, 163, 184, 0.16);
+  color: #94a3b8;
+}
+
+.voice-status-pill .voice-status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.voice-status-off {
+  color: #94a3b8;
+}
+
+.voice-status-on {
+  color: #0ea5e9;
+  background: rgba(14, 165, 233, 0.14);
+}
+
+.voice-status-listening {
+  color: #16a34a;
+  background: rgba(22, 163, 74, 0.14);
+}
+
+.voice-status-listening .voice-status-dot {
+  animation: voiceStatusPulse 1.2s ease-in-out infinite;
+}
+
+.voice-status-recognizing {
+  color: #d97706;
+  background: rgba(217, 119, 6, 0.14);
+}
+
+.voice-status-error {
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.14);
+}
+
+@keyframes voiceStatusPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.5); opacity: 0.5; }
+}
+
+.voice-fallback-button {
+  width: 100%;
+}
+
+.voice-hint {
+  font-size: 12px;
+}
+
+.voice-consent-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.voice-consent-card {
+  width: min(360px, 100%);
+  display: grid;
+  gap: 10px;
+  padding: 22px;
+  border-radius: 18px;
+  background: var(--surface, #ffffff);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+}
+
+.voice-consent-card h3 {
+  margin: 0;
+  color: var(--text-strong);
+}
+
+.voice-consent-card p {
+  margin: 0;
+  color: var(--text-soft, #64748b);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.voice-consent-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.voice-consent-actions .primary-button,
+.voice-consent-actions .ghost-button {
+  width: 100%;
+  justify-content: center;
+}
+
+.demo-finish-layout {
+  min-height: 100vh;
+  align-items: center;
+}
+
+@media (max-width: 720px) {
+  .demo-flow {
+    padding: 14px 12px 96px;
+  }
+
+  .demo-compact-list li {
+    display: grid;
+  }
+
+  .demo-compact-list span {
+    text-align: left;
+  }
+}
+
 .app-shell-mobile {
   width: min(100%, 480px);
   padding:
@@ -599,6 +852,67 @@
 
 .import-link-field textarea {
   min-height: 116px;
+}
+
+.demo-file-input {
+  display: none;
+}
+
+.demo-file-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(122, 83, 52, 0.14);
+  background: rgba(255, 251, 245, 0.9);
+  color: var(--text-strong);
+}
+
+.demo-file-summary span {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.demo-key-frame {
+  width: 100%;
+  min-height: 260px;
+  max-height: 420px;
+  object-fit: contain;
+  border-radius: 18px;
+  border: 1px solid rgba(122, 83, 52, 0.12);
+  background: rgba(122, 83, 52, 0.08);
+  box-shadow: 0 16px 34px rgba(94, 63, 39, 0.14);
+}
+
+.demo-step-video-shell {
+  display: grid;
+  gap: 10px;
+}
+
+.demo-step-video {
+  display: block;
+  width: 100%;
+  max-height: min(62vh, 560px);
+  min-height: 260px;
+  border-radius: 18px;
+  border: 1px solid rgba(122, 83, 52, 0.12);
+  background: #1f160f;
+  object-fit: contain;
+  box-shadow: 0 16px 34px rgba(94, 63, 39, 0.14);
+}
+
+.demo-video-segment-caption {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.demo-video-segment-caption strong {
+  color: var(--text-strong);
 }
 
 .import-progress-track {
@@ -5143,4 +5457,706 @@ button {
 
 .prep-bottom-bar {
   z-index: 35;
+}
+
+.competition-shell {
+  min-height: 100vh;
+  align-content: start;
+  gap: 14px;
+}
+
+.competition-hero,
+.competition-proof-card {
+  display: grid;
+  gap: 16px;
+}
+
+.competition-reference-card {
+  display: grid;
+  gap: 14px;
+}
+
+.competition-reference-card h2 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 1.2rem;
+}
+
+.reference-recipe-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.reference-recipe-grid > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid rgba(122, 83, 52, 0.09);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.reference-recipe-grid strong {
+  color: var(--text-strong);
+}
+
+.reference-recipe-grid p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.reference-timeline-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.competition-hero {
+  padding: 24px 20px;
+  background:
+    linear-gradient(180deg, rgba(255, 253, 249, 0.98), rgba(255, 244, 232, 0.94));
+}
+
+.competition-hero h1 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: clamp(32px, 9vw, 48px);
+  line-height: 1.08;
+}
+
+.competition-hero p,
+.competition-proof-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.competition-primary-action {
+  width: 100%;
+  justify-content: center;
+}
+
+.competition-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.competition-actions > * {
+  justify-content: center;
+}
+
+.competition-failure {
+  border-color: rgba(220, 38, 38, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 253, 249, 0.98), rgba(254, 242, 242, 0.94));
+}
+
+.competition-progress-value {
+  width: 72%;
+  animation: competitionProgress 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes competitionProgress {
+  from { width: 24%; }
+  to { width: 92%; }
+}
+
+.competition-finish {
+  display: grid;
+  gap: 18px;
+  min-height: 58vh;
+  align-content: center;
+}
+
+.competition-finish h1 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: clamp(30px, 8vw, 44px);
+  line-height: 1.1;
+}
+
+.step-video-action-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 16px;
+  border: 1px solid rgba(240, 100, 35, 0.14);
+  border-radius: 16px;
+  background: rgba(255, 250, 244, 0.92);
+}
+
+.step-reminder-strip {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(240, 100, 35, 0.12);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.step-reminder-strip span {
+  color: var(--accent-deep);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.step-reminder-strip strong {
+  color: var(--text-strong);
+  line-height: 1.45;
+}
+
+.coach-command-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.voice-panel-hero {
+  align-content: start;
+}
+
+.voice-toggle-large {
+  width: 100%;
+  min-height: 96px;
+  justify-content: center;
+  border-radius: 22px;
+  font-size: 1.08rem;
+}
+
+.coach-step-support {
+  align-content: start;
+}
+
+.coach-step-support ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.step-video-action-card strong {
+  display: block;
+  color: var(--text-strong);
+  line-height: 1.35;
+}
+
+.step-video-action-card p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.step-video-notice {
+  color: #b45309 !important;
+  font-weight: 700;
+}
+
+.step-video-play-button,
+.step-nav-video-button {
+  min-height: 48px;
+  white-space: nowrap;
+}
+
+.step-insight-grid-compact {
+  margin-top: 4px;
+}
+
+.step-video-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  padding:
+    max(14px, calc(env(safe-area-inset-top, 0px) + 10px))
+    14px
+    max(14px, calc(env(safe-area-inset-bottom, 0px) + 10px));
+  background: #080604;
+  color: #fffaf4;
+}
+
+.step-video-overlay-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.step-video-overlay-header span {
+  color: rgba(255, 250, 244, 0.62);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.step-video-overlay-header strong {
+  display: block;
+  margin-top: 4px;
+  font-size: clamp(20px, 6vw, 32px);
+  line-height: 1.15;
+}
+
+.step-video-overlay-header p,
+.step-video-overlay-hint {
+  margin: 6px 0 0;
+  color: rgba(255, 250, 244, 0.72);
+}
+
+.step-video-overlay-close {
+  min-height: 44px;
+  color: #fffaf4;
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.step-video-overlay-stage {
+  min-height: 0;
+  display: grid;
+  place-items: center;
+}
+
+.step-video-overlay-player {
+  width: 100%;
+  height: 100%;
+  max-height: calc(100vh - 150px);
+  object-fit: contain;
+  background: #000;
+}
+
+.step-video-overlay-empty {
+  width: min(100%, 420px);
+  display: grid;
+  gap: 8px;
+  padding: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.08);
+  text-align: center;
+}
+
+.step-video-overlay-empty p {
+  margin: 0;
+  color: rgba(255, 250, 244, 0.72);
+  line-height: 1.6;
+}
+
+@media (max-width: 900px) {
+  .app-shell-cooking {
+    width: min(100%, 560px);
+    padding:
+      max(12px, calc(env(safe-area-inset-top, 0px) + 8px))
+      10px
+      calc(96px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .cook-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    width: 100%;
+  }
+
+  .cook-primary-column {
+    gap: 12px;
+  }
+
+  .cook-header,
+  .step-panel,
+  .cook-support-section {
+    padding: 14px;
+    border-radius: 16px;
+  }
+
+  .cook-header {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .cook-header .progress-block {
+    grid-column: 1 / -1;
+  }
+
+  .cook-header-copy h2 {
+    font-size: clamp(22px, 7vw, 30px);
+  }
+
+  .page-module-heading {
+    display: none;
+  }
+
+  .step-panel-head {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .step-panel-head .ghost-button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .step-title {
+    font-size: clamp(30px, 10vw, 42px);
+  }
+
+  .step-lead {
+    font-size: 20px;
+  }
+
+  .step-detail {
+    font-size: 15px;
+  }
+
+  .step-video-action-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .step-video-play-button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .timer-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .timer-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .step-insight-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .coach-note {
+    display: none;
+  }
+
+  .coach-command-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .voice-toggle-large {
+    min-height: 88px;
+  }
+
+  .voice-panel,
+  .prompt-panel,
+  .chat-panel {
+    padding: 14px;
+  }
+
+  .prompt-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .step-nav {
+    position: sticky;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+    z-index: 40;
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.1fr) minmax(0, 1fr);
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid rgba(122, 83, 52, 0.1);
+    border-radius: 18px;
+    background: rgba(255, 250, 244, 0.98);
+    box-shadow: 0 16px 32px rgba(94, 63, 39, 0.14);
+    backdrop-filter: blur(12px);
+  }
+
+  .step-nav > * {
+    width: 100%;
+    min-height: 50px;
+    padding-inline: 8px;
+    justify-content: center;
+    font-size: 13px;
+  }
+
+  .step-nav .primary-button {
+    font-size: 15px;
+  }
+}
+
+@media (max-width: 600px) {
+  .app-shell-cooking {
+    padding-inline: 8px;
+  }
+
+  .cook-layout {
+    gap: 10px;
+  }
+
+  .cook-header,
+  .step-panel,
+  .cook-support-section,
+  .voice-panel,
+  .prompt-panel,
+  .chat-panel,
+  .timer-card,
+  .step-video-action-card,
+  .info-card {
+    border-radius: 14px;
+  }
+
+  .step-lead {
+    font-size: 18px;
+    line-height: 1.55;
+  }
+
+  .timer-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .step-nav {
+    grid-template-columns: minmax(0, 0.75fr) minmax(0, 1fr) minmax(0, 0.9fr);
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .step-nav > * {
+    min-height: 48px;
+    font-size: 12px;
+  }
+
+  .step-video-overlay {
+    padding-inline: 10px;
+  }
+}
+
+/* Focused semifinal cook screen: top current step, middle voice/AI, bottom controls. */
+.cook-layout-focused {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px));
+}
+
+.cook-layout-focused .cook-header-focused {
+  order: 0;
+}
+
+.cook-layout-focused .cook-support-focused {
+  order: 1;
+}
+
+.cook-layout-focused .step-nav-focused {
+  order: 2;
+}
+
+.cook-header-focused {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 12px;
+  align-items: start;
+  padding: 12px 14px;
+  border: 1px solid rgba(122, 83, 52, 0.1);
+  border-radius: 16px;
+  background: rgba(255, 250, 244, 0.96);
+  box-shadow: 0 8px 22px rgba(94, 63, 39, 0.07);
+}
+
+.cook-header-focused .progress-block {
+  grid-column: 1 / -1;
+}
+
+.cook-header-focused .cook-header-copy h2 {
+  margin: 0;
+  font-size: clamp(22px, 6vw, 30px);
+  line-height: 1.16;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.cook-header-focused .cook-header-copy p {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: clamp(15px, 4vw, 18px);
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+
+.current-step-reminder {
+  display: block;
+  padding: 10px 12px;
+  border: 1px solid rgba(240, 100, 35, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--text-strong);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.cook-support-focused {
+  padding: 14px;
+}
+
+.coach-command-grid-focused {
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.voice-prompt-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.voice-prompt-stack .prompt-chip {
+  width: 100%;
+  min-height: 42px;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.voice-panel-compact {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.voice-command-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.voice-command-grid .prompt-chip {
+  width: 100%;
+  min-height: 44px;
+  justify-content: center;
+  padding-inline: 10px;
+  text-align: center;
+  font-size: 13px;
+}
+
+.voice-support-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.coach-answer-panel {
+  display: grid;
+  min-height: 0;
+}
+
+.coach-answer-heading {
+  display: grid;
+  gap: 4px;
+}
+
+.coach-answer-heading h3 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 1.05rem;
+}
+
+.coach-answer-panel .chat-log {
+  max-height: min(30vh, 220px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.step-nav-focused {
+  position: sticky;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+  z-index: 45;
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr) minmax(0, 0.95fr);
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(122, 83, 52, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 250, 244, 0.98);
+  box-shadow: 0 16px 32px rgba(94, 63, 39, 0.14);
+  backdrop-filter: blur(12px);
+}
+
+.step-nav-focused > * {
+  width: 100%;
+  min-height: 52px;
+  justify-content: center;
+  padding-inline: 8px;
+}
+
+@media (max-width: 900px) {
+  .coach-command-grid-focused {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .voice-toggle-large {
+    min-height: 70px;
+  }
+}
+
+@media (max-width: 600px) {
+  .cook-layout-focused {
+    gap: 10px;
+  }
+
+  .cook-header-focused,
+  .cook-support-focused {
+    border-radius: 14px;
+  }
+
+  .cook-header-focused {
+    padding: 10px 12px;
+  }
+
+  .coach-command-grid-focused {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .voice-toggle-large {
+    min-height: 64px;
+    font-size: 0.98rem;
+  }
+
+  .voice-panel-hero,
+  .coach-answer-panel {
+    padding: 12px;
+  }
+
+  .voice-command-grid .prompt-chip {
+    min-height: 38px;
+    padding-inline: 10px;
+    font-size: 12px;
+  }
+
+  .chat-bubble {
+    padding: 10px;
+  }
+
+  .coach-answer-panel .chat-log {
+    max-height: 30vh;
+  }
+
+  .step-nav-focused {
+    grid-template-columns: minmax(0, 0.72fr) minmax(0, 0.9fr) minmax(0, 0.82fr);
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .step-nav-focused > * {
+    min-height: 48px;
+    font-size: 12px;
+  }
 }

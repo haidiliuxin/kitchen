@@ -42,7 +42,6 @@ export function PrepScreen({
     originalAmount: ingredient.amount,
     scaledAmount: ingredient.amount,
   }))
-  const hasMissingIngredients = missingIngredients.length > 0
 
   return (
     <main className="mobile-page-stack prep-screen">
@@ -106,6 +105,7 @@ export function PrepScreen({
                   <span>
                     <strong>{ingredient.name}</strong>
                     <small>{ingredient.scaledAmount}</small>
+                    <em>勾选表示还没准备好</em>
                     {ingredient.note ? <em>{ingredient.note}</em> : null}
                   </span>
                 </label>
@@ -114,7 +114,7 @@ export function PrepScreen({
                     className="prep-missing-input"
                     value={getMissingAmount(missingIngredients, ingredient.name)}
                     onChange={(event) => onMissingAmountChange(ingredient.name, event.target.value)}
-                    placeholder="缺多少？"
+                    placeholder="备注（可选）"
                   />
                 ) : null}
               </li>
@@ -126,8 +126,8 @@ export function PrepScreen({
       <section className="panel mobile-page-section ds-card-section">
         <div className="section-heading compact-heading">
           <div>
-            <span className="section-kicker">工具与补买</span>
-            <h2>{hasMissingIngredients ? '缺的食材可以先补齐' : '确认厨房工具'}</h2>
+            <span className="section-kicker">工具确认</span>
+            <h2>确认厨房工具</h2>
           </div>
         </div>
         <div className="tool-row">
@@ -136,15 +136,6 @@ export function PrepScreen({
           ))}
         </div>
         <p className="prep-note">{prepPlan?.note ?? '确认食材和工具都在手边，再进入正式做菜。'}</p>
-        {hasMissingIngredients && prepPlan ? (
-          <div className="prep-shopping-actions">
-            {prepPlan.shoppingLinks.map((link) => (
-              <a key={link.platform} className="ghost-button prep-shopping-link" href={link.url} target="_blank" rel="noreferrer">
-                {link.label}
-              </a>
-            ))}
-          </div>
-        ) : null}
       </section>
 
       <div className="recipe-detail-bottom-bar prep-bottom-bar">

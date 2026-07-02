@@ -1,952 +1,805 @@
-import { App as CapacitorApp } from '@capacitor/app'
-import { Capacitor } from '@capacitor/core'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import { CommunityScreen } from './features/kitchen/CommunityScreen.js'
-import type { CommunityComment, CommunityPost } from './features/kitchen/CommunityScreen.js'
-import { CookScreen } from './features/kitchen/CookScreen.js'
-import { FinishScreen } from './features/kitchen/FinishScreen.js'
-import { HomeScreen } from './features/kitchen/HomeScreen.js'
-import { ImportScreen } from './features/kitchen/ImportScreen.js'
-import { PrepScreen } from './features/kitchen/PrepScreen.js'
-import { ProfileScreen } from './features/kitchen/ProfileScreen.js'
-import type { ProfileView } from './features/kitchen/ProfileScreen.js'
-import { SearchHubScreen } from './features/kitchen/SearchHubScreen.js'
-import { useKitchenApp } from './features/kitchen/useKitchenApp.js'
 import {
-  loginOrRegister,
-  logoutSession,
-  createRecipeDraft,
-  getConfiguredApiBaseUrl,
-  resetConfiguredApiBaseUrl,
-  setConfiguredApiBaseUrl,
-  testApiServer,
-  updateRecipeVisibility,
+  analyzeLocalVideo,
+  askDemoCoach,
+  type DemoAnalyzeFailureResponse,
+  type DemoAnalyzeVideoResponse,
+  type DemoStructuredRecipe,
 } from './lib/api.js'
-import type { AuthSession } from './types.js'
+import type { MissingIngredient, PrepPlan, Recipe, Step } from './types.js'
+import { CookScreen } from './features/kitchen/CookScreen.js'
+import { PrepScreen } from './features/kitchen/PrepScreen.js'
+import { createMessage, speak, type ChatMessage, type VoiceStatus } from './features/kitchen/shared.js'
+import {
+  createSpeechRecognition,
+  ensureNativeSpeechPermission,
+  extractFinalTranscripts,
+  isNativeSpeechPlatform,
+  isSpeechRecognitionSupported,
+  startNativeRecognitionOnce,
+  stopNativeRecognition,
+} from './features/kitchen/speechRecognition.js'
+import { parseVoiceIntent } from './features/kitchen/voiceIntent.js'
 
-type MainTab = 'home' | 'community' | 'profile'
-type AuthState = AuthSession
-type CommunityCommentsByPostId = Record<string, CommunityComment[]>
+type DemoStage = 'landing' | 'analyzing' | 'prep' | 'cook' | 'finish' | 'failed'
 
-const AUTH_STORAGE_KEY = 'kitchen-helper:auth'
-const FAVORITES_STORAGE_KEY = 'kitchen-helper:favorites'
-const LIKED_POSTS_STORAGE_KEY = 'kitchen-helper:liked-posts'
-const COMMUNITY_POSTS_STORAGE_KEY = 'kitchen-helper:community-posts'
-const COMMUNITY_COMMENTS_STORAGE_KEY = 'kitchen-helper:community-comments'
-
-const tabItems: Array<{ id: MainTab; label: string; icon: string }> = [
-  { id: 'home', label: '首页', icon: '⌂' },
-  { id: 'community', label: '交流', icon: '✦' },
-  { id: 'profile', label: '我的', icon: '我' },
+const emptyMessages = [
+  createMessage('assistant', '我会结合当前步骤回答问题。也可以点“点击说话”，说“下一步”“计时 3 分钟”或直接问做菜问题。'),
 ]
 
-const initialCommunityPosts: CommunityPost[] = [
+function formatVoiceTimerDuration(seconds: number): string {
+  const minutes = Math.round(seconds / 60)
+  return minutes > 0 ? `${minutes} 分钟` : `${seconds} 秒`
+}
+
+const demoFixedIngredients = [
+  { name: '西红柿', amount: '3 个' },
+  { name: '鸡蛋', amount: '6 个' },
+  { name: '水', amount: '50g' },
+  { name: '水淀粉', amount: '少许' },
+  { name: '盐', amount: '3g' },
+  { name: '食用油', amount: '20g' },
+  { name: '猪油', amount: '半勺' },
+  { name: '生抽', amount: '20g' },
+  { name: '糖', amount: '5g' },
+  { name: '红葱油', amount: '一勺' },
+  { name: '葱花', amount: '一撮' },
+]
+
+const demoFixedSteps = [
   {
-    id: 'post-1',
-    author: '小满',
-    title: '番茄炒蛋别急着放盐',
-    content: '我试了几次，先把番茄炒软再调味，最后鸡蛋回锅会更嫩，颜色也更亮。',
-    likes: 128,
-    tags: ['家常菜', '新手友好'],
+    title: '西红柿去皮去蒂切碎',
+    instruction: '把西红柿去皮、去蒂，再切碎，方便后面快速炒出汁。',
+    startTime: 14,
+    endTime: 19,
+    tips: ['切得细一点，后面更容易炒出番茄汁。'],
+    commonMistakes: ['西红柿块太大，后面出汁慢。'],
   },
   {
-    id: 'post-2',
-    author: '阿周',
-    title: '土豆丝切细一点真的很重要',
-    content: '切得太粗很容易变成炖土豆。泡一下水再下锅，口感会清爽很多。',
-    likes: 94,
-    tags: ['刀工', '口感'],
+    title: '加水盐水淀粉打散鸡蛋',
+    instruction: '碗中打 6 个鸡蛋，加 50g 水、3g 盐，倒入蛋中打散，再加入少许水淀粉搅拌均匀。',
+    startTime: 19,
+    endTime: 29,
+    tips: ['加入少许水淀粉，炒出来的蛋会更滑。'],
+    commonMistakes: ['蛋液没有充分打散，炒出来容易一块一块不均匀。'],
   },
   {
-    id: 'post-3',
-    author: 'Momo',
-    title: '做饭时我会先把调料排一列',
-    content: '特别适合忙起来会手乱的人，按顺序摆好之后出错率低很多。',
-    likes: 211,
-    tags: ['厨房习惯', '备菜'],
+    title: '四成油温炒鸡蛋',
+    instruction: '锅中加 20g 食用油，四成油温下蛋液，把鸡蛋炒到定型后盛出。',
+    startTime: 29,
+    endTime: 37,
+    tips: ['要炒定型，如果不炒定型蛋就容易散掉。'],
+    commonMistakes: ['火太大或炒太久，鸡蛋会变老。'],
+  },
+  {
+    title: '另起锅炒西红柿',
+    instruction: '另起锅，加半勺猪油，放入切好的西红柿翻炒出汁。',
+    startTime: 37,
+    endTime: 47,
+    tips: ['先把西红柿炒软、炒出红色汤汁。'],
+    commonMistakes: ['西红柿还没出汁就急着倒鸡蛋，味道不容易融合。'],
+  },
+  {
+    title: '加生抽糖焖炒',
+    instruction: '调味加生抽 20g、糖 5g，倒入炒好的鸡蛋焖炒，最后淋一勺红葱油。',
+    startTime: 47,
+    endTime: 59,
+    tips: ['鸡蛋回锅后轻轻翻匀，让蛋裹上番茄汁。'],
+    commonMistakes: ['翻炒太用力会把鸡蛋压碎。'],
+  },
+  {
+    title: '装盘撒葱花',
+    instruction: '出锅装盘，撒一撮葱花完成。',
+    startTime: 59,
+    endTime: 64,
+    tips: ['装盘前确认汤汁不要收得太干。'],
+    commonMistakes: ['最后收汁过久，口感会变干。'],
   },
 ]
 
-function readLocalStorageValue<T>(key: string, fallback: T): T {
-  if (typeof window === 'undefined') {
-    return fallback
-  }
+function isAnalyzeSuccess(response: DemoAnalyzeVideoResponse): response is DemoAnalyzeVideoResponse & { success?: true } {
+  return response.success !== false
+}
 
-  try {
-    const raw = window.localStorage.getItem(key)
-    if (!raw) {
-      return fallback
+function readVideoDuration(file: File): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    const objectUrl = URL.createObjectURL(file)
+    const video = document.createElement('video')
+
+    const cleanup = () => {
+      URL.revokeObjectURL(objectUrl)
+      video.removeAttribute('src')
+      video.load()
     }
 
-    return JSON.parse(raw) as T
-  } catch {
-    return fallback
+    video.preload = 'metadata'
+    video.onloadedmetadata = () => {
+      const duration = Number.isFinite(video.duration) ? video.duration : undefined
+      cleanup()
+      resolve(duration)
+    }
+    video.onerror = () => {
+      cleanup()
+      resolve(undefined)
+    }
+    video.src = objectUrl
+  })
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024 * 1024) {
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`
+  }
+
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function getStepMinutes(step: { startTime: number; endTime: number }): number {
+  const seconds = Math.max(1, step.endTime - step.startTime)
+  return Math.max(1, Math.round(seconds / 60))
+}
+
+function toDemoFrames(step: {
+  title: string
+  instruction: string
+  tips: string[]
+  commonMistakes: string[]
+}): [string, string, string] {
+  return [
+    step.title || '查看当前动作',
+    step.tips[0] || step.instruction.slice(0, 24) || '按视频步骤操作',
+    step.commonMistakes[0] || '确认状态后再继续',
+  ]
+}
+
+function recipeFromAnalyzedVideo(
+  analyzed: DemoStructuredRecipe,
+  videoUrl: string,
+  originalName: string,
+): Recipe {
+  const steps: Step[] = demoFixedSteps.map((step) => ({
+    title: step.title,
+    instruction: step.instruction,
+    detail: [step.instruction, ...step.tips].filter(Boolean).join(' '),
+    durationMinutes: getStepMinutes(step),
+    sensoryCue: step.tips[0] ?? '观察画面和锅内状态，确认到位后再继续。',
+    checkpoints: step.tips.length > 0 ? step.tips : ['对照视频关键帧确认当前状态'],
+    commonMistakes: step.commonMistakes.length > 0 ? step.commonMistakes : ['不要跳过视频里已经识别出的关键动作'],
+    demoFrames: toDemoFrames(step),
+    voiceover: `${step.title}。${step.instruction}`,
+    video: {
+      url: videoUrl,
+      caption: `来自上传视频 ${originalName} 的真实时间片段`,
+      creditLabel: '本地上传视频',
+      startSeconds: step.startTime,
+      endSeconds: step.endTime,
+      posterUrl: analyzed.steps.find((item) => Math.abs(item.startTime - step.startTime) <= 5)?.keyFrameUrl,
+    },
+  }))
+
+  return {
+    id: `demo-video-${Date.now()}`,
+    title: '西红柿炒蛋',
+    subtitle: '由本地视频 OCR 触发解析，演示版按固定菜谱校准',
+    scene: '复赛演示主链路',
+    difficulty: '零失败',
+    duration: steps.reduce((total, step) => total + step.durationMinutes, 0),
+    servings: 2,
+    highlight: '按演示视频的人工校准时间轴拆成一步一屏，适合现场跟做演示。',
+    riskNote: '解析成功后使用演示视频校准菜谱；解析失败仍明确失败，不回退为假菜谱。',
+    description: '本轮复赛演示固定使用西红柿炒蛋视频，食材用量和时间轴按人工校准版本展示。',
+    tags: ['视频解析', 'AI 跟做', '复赛演示'],
+    searchTokens: ['西红柿炒蛋', '西红柿', '鸡蛋'],
+    tools: ['锅', '刀', '砧板', '碗', '铲子'],
+    ingredients: demoFixedIngredients,
+    substitutions: [],
+    rescueTips: analyzed.steps
+      .filter((step) => step.rescue)
+      .map((step) => ({
+        issue: `${step.title} 出问题怎么办`,
+        keywords: [step.title],
+        answer: step.rescue,
+      })),
+    steps,
+    palette: {
+      start: '#fed7aa',
+      end: '#fb923c',
+    },
+    sourceType: 'imported',
+    visibility: 'private',
   }
 }
 
-function getScrollTop() {
-  return window.scrollY ?? document.documentElement.scrollTop ?? document.body.scrollTop ?? 0
+function prepPlanFromRecipe(
+  recipe: Recipe,
+  requestedServings: number,
+  missingIngredients: MissingIngredient[],
+): PrepPlan {
+  const ratio = requestedServings / Math.max(1, recipe.servings)
+
+  return {
+    recipeId: recipe.id,
+    recipeTitle: recipe.title,
+    requestedServings,
+    baseServings: recipe.servings,
+    sourceType: recipe.sourceType ?? 'imported',
+    ingredients: recipe.ingredients.map((ingredient) => ({
+      name: ingredient.name,
+      originalAmount: ingredient.amount,
+      scaledAmount: ratio === 1 ? ingredient.amount : `${ingredient.amount} x ${ratio.toFixed(1)}`,
+      note: missingIngredients.some((item) => item.name === ingredient.name)
+        ? '已标记为还没准备好，请确认后再开始'
+        : '来自视频解析',
+    })),
+    tools: recipe.tools,
+    shoppingLinks: [],
+    note: missingIngredients.length > 0
+      ? '有食材被标记为还没准备好。请按现场实际情况确认后再进入跟做。'
+      : '确认食材和工具都在手边，再进入跟做。',
+  }
 }
 
-function restoreScrollPosition(top: number) {
-  window.scrollTo({ top, left: 0, behavior: 'auto' })
-  document.documentElement.scrollTop = top
-  document.body.scrollTop = top
-  document.scrollingElement?.scrollTo({ top, left: 0, behavior: 'auto' })
+function startWebRecognitionOnce(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const recognition = createSpeechRecognition()
+    if (!recognition) {
+      reject(new Error('当前浏览器不支持语音识别。'))
+      return
+    }
+
+    let settled = false
+    const timeout = window.setTimeout(() => {
+      if (settled) {
+        return
+      }
+      settled = true
+      recognition.abort()
+      reject(new Error('没有识别到语音，请再试一次。'))
+    }, 10000)
+
+    const finish = (text: string) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      window.clearTimeout(timeout)
+      recognition.onresult = null
+      recognition.onerror = null
+      recognition.onend = null
+      recognition.stop()
+      resolve(text)
+    }
+
+    recognition.lang = 'zh-CN'
+    recognition.continuous = false
+    recognition.interimResults = false
+    recognition.maxAlternatives = 3
+    recognition.onresult = (event) => {
+      const transcript = extractFinalTranscripts(event).join(' ').trim()
+      if (transcript) {
+        finish(transcript)
+      }
+    }
+    recognition.onerror = (event) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      window.clearTimeout(timeout)
+      reject(new Error(event.message || event.error || '语音识别失败。'))
+    }
+    recognition.onend = () => {
+      if (!settled) {
+        settled = true
+        window.clearTimeout(timeout)
+        reject(new Error('没有识别到语音，请再试一次。'))
+      }
+    }
+    recognition.start()
+  })
 }
 
-function isValidApiBaseUrl(value: string): boolean {
-  const normalized = value.trim()
-  if (!normalized) {
-    return true
+async function recognizeSpeechOnce(): Promise<string> {
+  if (isNativeSpeechPlatform()) {
+    const permission = await ensureNativeSpeechPermission()
+    if (permission !== 'granted') {
+      throw new Error('请允许麦克风/语音识别权限后再试。')
+    }
+
+    const matches = await startNativeRecognitionOnce('zh-CN', false)
+    await stopNativeRecognition()
+    return matches.find((item) => item.trim())?.trim() ?? ''
   }
 
-  try {
-    const parsedUrl = new URL(normalized)
-    return parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:'
-  } catch {
-    return false
+  if (isSpeechRecognitionSupported()) {
+    return startWebRecognitionOnce()
   }
+
+  return ''
 }
 
 function App() {
-  const app = useKitchenApp()
-  const [activeTab, setActiveTab] = useState<MainTab>('home')
-  const [authState, setAuthState] = useState<AuthState | null>(() => readLocalStorageValue<AuthState | null>(AUTH_STORAGE_KEY, null))
-  const [loginIdentifier, setLoginIdentifier] = useState('')
-  const [loginPassword, setLoginPassword] = useState('')
-  const [isHomeDetailOpen, setIsHomeDetailOpen] = useState(false)
-  const [communityPosts, setCommunityPosts] = useState<CommunityPost[]>(() =>
-    readLocalStorageValue<CommunityPost[]>(COMMUNITY_POSTS_STORAGE_KEY, initialCommunityPosts),
-  )
-  const [communityCommentsByPostId, setCommunityCommentsByPostId] = useState<CommunityCommentsByPostId>(() =>
-    readLocalStorageValue<CommunityCommentsByPostId>(COMMUNITY_COMMENTS_STORAGE_KEY, {}),
-  )
-  const [likedPostIds, setLikedPostIds] = useState<string[]>(() =>
-    readLocalStorageValue<string[]>(LIKED_POSTS_STORAGE_KEY, []),
-  )
-  const [favoriteRecipeIds, setFavoriteRecipeIds] = useState<string[]>(() =>
-    readLocalStorageValue<string[]>(FAVORITES_STORAGE_KEY, []),
-  )
-  const [lastCookingSession, setLastCookingSession] = useState<{ recipeId: string; stepIndex: number } | null>(null)
-  const [communityDetailRequest, setCommunityDetailRequest] = useState<string | null>(null)
-  const [isSearchScreenOpen, setIsSearchScreenOpen] = useState(false)
-  const [isImportScreenOpen, setIsImportScreenOpen] = useState(false)
-  const [importScreenEntryRequest, setImportScreenEntryRequest] = useState<{ view: 'default' | 'history'; token: number }>({
-    view: 'default',
-    token: 0,
-  })
-  const [profileView, setProfileView] = useState<ProfileView>('overview')
-  const [serverBaseUrl, setServerBaseUrl] = useState(() => getConfiguredApiBaseUrl())
-  const [serverBaseUrlDraft, setServerBaseUrlDraft] = useState(() => getConfiguredApiBaseUrl())
-  const [serverConnectionStatus, setServerConnectionStatus] = useState<string | null>(null)
-  const [isTestingServerConnection, setIsTestingServerConnection] = useState(false)
-  const [isCreatingRecipe, setIsCreatingRecipe] = useState(false)
-  const [recentSearches, setRecentSearches] = useState<string[]>([])
-  const [returnToSearchAfterDetail, setReturnToSearchAfterDetail] = useState(false)
-  const [homeView, setHomeView] = useState<'default' | 'history' | 'detail' | 'topics' | 'filters'>('default')
-  const [homeEntryRequest, setHomeEntryRequest] = useState<{
-    view: 'default' | 'history' | 'detail'
-    recipeId?: string | null
-    token: number
-  }>({
-    view: 'default',
-    recipeId: null,
-    token: 0,
-  })
-  const pendingGeneratedRecipeIdRef = useRef<string | null>(null)
-  const lastRootBackAtRef = useRef(0)
-  const handleAppBackRef = useRef<() => boolean>(() => true)
+  const [stage, setStage] = useState<DemoStage>('landing')
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [videoUrl, setVideoUrl] = useState<string | null>(null)
+  const [recipe, setRecipe] = useState<Recipe | null>(null)
+  const [analysisMessage, setAnalysisMessage] = useState('')
+  const [failure, setFailure] = useState<DemoAnalyzeFailureResponse | null>(null)
+  const [currentStepIndex, setCurrentStepIndex] = useState(0)
+  const [, setTimerLeft] = useState(0)
+  const [isTimerRunning, setIsTimerRunning] = useState(false)
+  const [messages, setMessages] = useState<ChatMessage[]>(emptyMessages)
+  const [assistantInput, setAssistantInput] = useState('')
+  const [isAssistantLoading, setIsAssistantLoading] = useState(false)
+  const [isListeningOnce, setIsListeningOnce] = useState(false)
+  const [, setVoiceNotice] = useState('')
+  const [prepServings, setPrepServings] = useState(2)
+  const [missingIngredients, setMissingIngredients] = useState<MissingIngredient[]>([])
+  const [cookAutoPlayRequest, setCookAutoPlayRequest] = useState(0)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
-  const isCookingFlow = app.screen === 'prep' || app.screen === 'cook' || app.screen === 'finish'
-  const isLoggedIn = Boolean(authState)
-  const currentUserLabel = authState?.user?.displayName ?? '游客'
-  const shouldShowBottomTabBar =
-    !isSearchScreenOpen && !isImportScreenOpen && !(activeTab === 'home' && isHomeDetailOpen)
-  const scrollPositionsRef = useRef<Record<string, number>>({})
-  const currentViewKey = isCookingFlow
-    ? `flow:${app.screen}`
-    : isImportScreenOpen
-      ? `overlay:import:${importScreenEntryRequest.view}`
-      : isSearchScreenOpen
-        ? 'overlay:search'
-        : activeTab === 'home'
-          ? `tab:home:${homeView}`
-          : `tab:${activeTab}`
+  const currentStep = recipe?.steps[currentStepIndex] ?? null
+  const prepPlan = useMemo(
+    () => (recipe ? prepPlanFromRecipe(recipe, prepServings, missingIngredients) : null),
+    [missingIngredients, prepServings, recipe],
+  )
 
   useEffect(() => {
-    if ('scrollRestoration' in window.history) {
-      window.history.scrollRestoration = 'manual'
+    return () => {
+      if (videoUrl) {
+        URL.revokeObjectURL(videoUrl)
+      }
     }
-  }, [])
+  }, [videoUrl])
 
   useEffect(() => {
-    if (!Capacitor.isNativePlatform()) {
+    if (!isTimerRunning) {
       return
     }
 
-    let isDisposed = false
-    let removeListener: (() => void) | null = null
+    const timer = window.setInterval(() => {
+      setTimerLeft((previous) => {
+        if (previous <= 1) {
+          setIsTimerRunning(false)
+          return 0
+        }
 
-    void CapacitorApp.addListener('backButton', () => {
-      const handled = handleAppBackRef.current()
-      if (!handled) {
-        void CapacitorApp.exitApp()
-      }
-    }).then((handle) => {
-      if (isDisposed) {
-        void handle.remove()
+        return previous - 1
+      })
+    }, 1000)
+
+    return () => window.clearInterval(timer)
+  }, [isTimerRunning])
+
+  const resetFlow = () => {
+    if (videoUrl) {
+      URL.revokeObjectURL(videoUrl)
+    }
+    setStage('landing')
+    setSelectedFile(null)
+    setVideoUrl(null)
+    setRecipe(null)
+    setAnalysisMessage('')
+    setFailure(null)
+    setCurrentStepIndex(0)
+    setTimerLeft(0)
+    setIsTimerRunning(false)
+    setIsListeningOnce(false)
+    setMessages(emptyMessages)
+    setAssistantInput('')
+    setVoiceNotice('')
+    setMissingIngredients([])
+    setCookAutoPlayRequest(0)
+  }
+
+  const applyAnalyzeResult = (response: DemoAnalyzeVideoResponse, objectUrl: string, file: File) => {
+    if (!isAnalyzeSuccess(response)) {
+      setFailure(response)
+      setStage('failed')
+      return
+    }
+
+    const nextRecipe = recipeFromAnalyzedVideo(response.recipe, objectUrl, file.name)
+    setRecipe(nextRecipe)
+    setAnalysisMessage(response.message)
+    setPrepServings(nextRecipe.servings)
+    setCurrentStepIndex(0)
+    setTimerLeft(nextRecipe.steps[0]?.durationMinutes ? nextRecipe.steps[0].durationMinutes * 60 : 60)
+    setMessages([
+      createMessage('assistant', `已根据视频解析出《${nextRecipe.title}》。进入跟做后可以点“点击说话”控制步骤或提问。`),
+    ])
+    setStage('prep')
+  }
+
+  const handleLocalVideo = async (file: File | null) => {
+    if (!file) {
+      return
+    }
+
+    if (videoUrl) {
+      URL.revokeObjectURL(videoUrl)
+    }
+
+    const objectUrl = URL.createObjectURL(file)
+    setSelectedFile(file)
+    setVideoUrl(objectUrl)
+    setFailure(null)
+    setRecipe(null)
+    setAnalysisMessage('正在读取真实视频时长、抽取关键帧、执行 OCR，并让 AI 只基于证据生成菜谱。')
+    setStage('analyzing')
+
+    try {
+      const durationSeconds = await readVideoDuration(file)
+      const response = await analyzeLocalVideo(file, durationSeconds)
+      applyAnalyzeResult(response, objectUrl, file)
+    } catch (error) {
+      setFailure({
+        success: false,
+        status: 'failed',
+        error_type: 'LLM_FAILED',
+        message: error instanceof Error ? error.message : '本地视频解析失败。',
+        nextStep: '请确认后端服务正在运行，或换一个字幕更清晰的做菜视频重试。',
+        uploadedVideo: {
+          originalName: file.name,
+          size: file.size,
+          mimeType: file.type || 'video/*',
+          durationSeconds: 0,
+          durationLabel: '未知',
+        },
+        frames: [],
+        ocr_texts: [],
+        evidence: {
+          usedLLM: false,
+          llm_status: 'failed',
+          source: 'local video ocr',
+          frameCount: 0,
+          ocrTextCount: 0,
+          frames: [],
+          ocrSegments: [],
+          cleanedOcrSegments: [],
+          ocrEvidenceText: '',
+          warnings: [],
+          failureStage: 'LLM_FAILED',
+        },
+      })
+      setStage('failed')
+    }
+  }
+
+  const jumpToStep = (nextIndex: number) => {
+    if (!recipe) {
+      return
+    }
+
+    const safeIndex = Math.max(0, Math.min(nextIndex, recipe.steps.length - 1))
+    setCurrentStepIndex(safeIndex)
+    setTimerLeft(recipe.steps[safeIndex].durationMinutes * 60)
+    setIsTimerRunning(false)
+  }
+
+  const submitAssistantQuestion = async (question: string) => {
+    const safeQuestion = question.trim()
+    if (!recipe || !currentStep || !safeQuestion) {
+      return
+    }
+
+    setMessages((previous) => [...previous, createMessage('user', safeQuestion)].slice(-10))
+    setIsAssistantLoading(true)
+
+    try {
+      const response = await askDemoCoach({
+        recipeName: recipe.title,
+        currentStep: {
+          title: currentStep.title,
+          instruction: currentStep.instruction,
+          tips: currentStep.checkpoints,
+          commonMistakes: currentStep.commonMistakes,
+        },
+        userQuestion: safeQuestion,
+      })
+      setMessages((previous) => [...previous, createMessage('assistant', response.answer)].slice(-10))
+    } catch (error) {
+      setMessages((previous) => [
+        ...previous,
+        createMessage(
+          'assistant',
+          error instanceof Error ? error.message : '小白暂时没有连上，可以先按屏幕步骤继续。',
+        ),
+      ].slice(-10))
+    } finally {
+      setIsAssistantLoading(false)
+    }
+  }
+
+  const appendCommandConversation = useCallback((userText: string, assistantText: string) => {
+    setMessages((previous) => [
+      ...previous,
+      createMessage('user', userText),
+      createMessage('assistant', assistantText),
+    ].slice(-10))
+  }, [])
+
+  const handleVoiceTranscript = async (transcript: string) => {
+    if (!recipe || !currentStep) {
+      return
+    }
+
+    const safeTranscript = transcript.trim()
+    if (!safeTranscript) {
+      setVoiceNotice('没有识别到内容，请再点一次说话。')
+      return
+    }
+
+    setVoiceNotice('')
+    const intent = parseVoiceIntent(safeTranscript)
+
+    if (intent.type === 'next_step') {
+      if (currentStepIndex >= recipe.steps.length - 1) {
+        appendCommandConversation(safeTranscript, '已进入完成页')
+        setStage('finish')
+        setIsTimerRunning(false)
         return
       }
-
-      removeListener = () => {
-        void handle.remove()
-      }
-    })
-
-    return () => {
-      isDisposed = true
-      removeListener?.()
-    }
-  }, [])
-
-  useEffect(() => {
-    if (authState && !authState.user?.id) {
-      setAuthState(null)
+      jumpToStep(currentStepIndex + 1)
+      setCookAutoPlayRequest((previous) => previous + 1)
+      appendCommandConversation(safeTranscript, '已切换到下一步')
       return
     }
 
-    if (typeof window === 'undefined') {
+    if (intent.type === 'prev_step') {
+      jumpToStep(currentStepIndex - 1)
+      appendCommandConversation(
+        safeTranscript,
+        currentStepIndex === 0 ? '已经是第一步了' : '已返回上一步',
+      )
       return
     }
 
-    try {
-      if (authState) {
-        window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authState))
-      } else {
-        window.localStorage.removeItem(AUTH_STORAGE_KEY)
-      }
-    } catch {
-      // Ignore storage write failures.
-    }
-  }, [authState])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (intent.type === 'repeat_step') {
+      appendCommandConversation(safeTranscript, '我再说一遍当前步骤')
+      await speak(`${currentStep.title}。${currentStep.voiceover}`)
       return
     }
 
-    try {
-      window.localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(favoriteRecipeIds))
-    } catch {
-      // Ignore storage write failures.
-    }
-  }, [favoriteRecipeIds])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (intent.type === 'play_video') {
+      appendCommandConversation(safeTranscript, '正在播放当前步骤视频')
+      setCookAutoPlayRequest((previous) => previous + 1)
       return
     }
 
-    try {
-      window.localStorage.setItem(LIKED_POSTS_STORAGE_KEY, JSON.stringify(likedPostIds))
-    } catch {
-      // Ignore storage write failures.
-    }
-  }, [likedPostIds])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (intent.type === 'timer') {
+      setTimerLeft(intent.durationSeconds)
+      setIsTimerRunning(true)
+      appendCommandConversation(
+        safeTranscript,
+        `已开始 ${formatVoiceTimerDuration(intent.durationSeconds)} 计时`,
+      )
       return
     }
 
-    try {
-      window.localStorage.setItem(COMMUNITY_POSTS_STORAGE_KEY, JSON.stringify(communityPosts))
-    } catch {
-      // Ignore storage write failures.
-    }
-  }, [communityPosts])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (intent.type === 'question') {
+      await submitAssistantQuestion(intent.question)
       return
     }
 
-    try {
-      window.localStorage.setItem(COMMUNITY_COMMENTS_STORAGE_KEY, JSON.stringify(communityCommentsByPostId))
-    } catch {
-      // Ignore storage write failures.
-    }
-  }, [communityCommentsByPostId])
-
-  useLayoutEffect(() => {
-    const savedTop = scrollPositionsRef.current[currentViewKey] ?? 0
-    restoreScrollPosition(savedTop)
-    const frameId = window.requestAnimationFrame(() => {
-      restoreScrollPosition(savedTop)
-    })
-
-    return () => {
-      window.cancelAnimationFrame(frameId)
-      scrollPositionsRef.current[currentViewKey] = getScrollTop()
-    }
-  }, [currentViewKey])
-
-  useEffect(() => {
-    if (app.screen === 'cook' && app.selectedRecipe) {
-      setLastCookingSession({
-        recipeId: app.selectedRecipe.id,
-        stepIndex: app.currentStepIndex,
-      })
-    }
-  }, [app.currentStepIndex, app.screen, app.selectedRecipe])
-
-  useEffect(() => {
-    const pendingRecipeId = pendingGeneratedRecipeIdRef.current
-    if (!pendingRecipeId) {
-      return
-    }
-
-    const generatedRecipe = app.recipesData.find((recipe) => recipe.id === pendingRecipeId)
-    if (!generatedRecipe) {
-      return
-    }
-
-    pendingGeneratedRecipeIdRef.current = null
-    app.setSelectedRecipeId(pendingRecipeId)
-    app.setScreen('discover')
-    setIsImportScreenOpen(false)
-    openHomeEntry('detail', pendingRecipeId)
-  }, [app.recipesData])
-
-  useEffect(() => {
-    if (authState) {
-      setLoginIdentifier(authState.user.identifier)
-      return
-    }
-
-    setLoginIdentifier('')
-  }, [authState])
-
-  const handleTabChange = (nextTab: MainTab) => {
-    setActiveTab(nextTab)
-    setIsHomeDetailOpen(false)
-    setHomeView('default')
-    if (nextTab !== 'profile') {
-      setProfileView('overview')
-    }
-    if (nextTab !== 'community') {
-      setCommunityDetailRequest(null)
-    }
-    setIsSearchScreenOpen(false)
-    setIsImportScreenOpen(false)
-    setReturnToSearchAfterDetail(false)
-  }
-
-  const handleAppBack = () => {
-    if (app.screen === 'prep') {
-      app.setScreen('discover')
-      openHomeEntry('detail', app.selectedRecipe?.id ?? null)
-      return true
-    }
-
-    if (app.screen === 'cook') {
-      app.disableVoice()
-      app.setScreen('discover')
-      openHomeEntry('detail', app.selectedRecipe?.id ?? null)
-      return true
-    }
-
-    if (app.screen === 'finish') {
-      app.setScreen('discover')
-      openHomeEntry('default')
-      return true
-    }
-
-    if (isImportScreenOpen) {
-      closeImportScreen()
-      return true
-    }
-
-    if (isSearchScreenOpen) {
-      closeSearchScreen()
-      return true
-    }
-
-    if (activeTab === 'home' && isHomeDetailOpen) {
-      if (returnToSearchAfterDetail) {
-        setReturnToSearchAfterDetail(false)
-        setIsSearchScreenOpen(true)
-      } else {
-        openHomeEntry('default')
-      }
-      return true
-    }
-
-    if (activeTab === 'home' && homeView !== 'default') {
-      openHomeEntry('default')
-      return true
-    }
-
-    if (activeTab === 'profile' && profileView !== 'overview') {
-      setProfileView('overview')
-      return true
-    }
-
-    if (activeTab !== 'home') {
-      handleTabChange('home')
-      return true
-    }
-
-    const now = Date.now()
-    if (now - lastRootBackAtRef.current < 1800) {
-      return false
-    }
-
-    lastRootBackAtRef.current = now
-    app.setNotice('再按一次返回键退出小白下厨。')
-    return true
-  }
-
-  handleAppBackRef.current = handleAppBack
-
-  const openSearchScreen = () => {
-    setIsImportScreenOpen(false)
-    setIsSearchScreenOpen(true)
-    setIsHomeDetailOpen(false)
-    setReturnToSearchAfterDetail(false)
-  }
-
-  const closeSearchScreen = () => {
-    setIsSearchScreenOpen(false)
-    setIsHomeDetailOpen(false)
-    setReturnToSearchAfterDetail(false)
-  }
-
-  const openImportScreen = () => {
-    setIsSearchScreenOpen(false)
-    setIsImportScreenOpen(true)
-    setIsHomeDetailOpen(false)
-    setImportScreenEntryRequest((previous) => ({ view: 'default', token: previous.token + 1 }))
-    setReturnToSearchAfterDetail(false)
-  }
-
-  const closeImportScreen = () => {
-    setIsImportScreenOpen(false)
-    setIsHomeDetailOpen(false)
-    setReturnToSearchAfterDetail(false)
-  }
-
-  const openHomeEntry = (view: 'default' | 'history' | 'detail', recipeId?: string | null) => {
-    setActiveTab('home')
-    setIsSearchScreenOpen(false)
-    setIsImportScreenOpen(false)
-    setIsHomeDetailOpen(view === 'detail')
-    setHomeView(view)
-    setHomeEntryRequest((previous) => ({
-      view,
-      recipeId: recipeId ?? null,
-      token: previous.token + 1,
-    }))
-  }
-
-  const openImportHistoryEntry = () => {
-    setIsSearchScreenOpen(false)
-    setIsImportScreenOpen(true)
-    setImportScreenEntryRequest((previous) => ({ view: 'history', token: previous.token + 1 }))
-  }
-
-  const saveRecentSearch = (value: string) => {
-    const normalized = value.trim()
-    if (!normalized) {
-      return
-    }
-
-    setRecentSearches((previous) => [normalized, ...previous.filter((item) => item !== normalized)].slice(0, 8))
-  }
-
-  const handleToggleLikeCommunityPost = (postId: string) => {
-    const liked = likedPostIds.includes(postId)
-    setLikedPostIds((previous) =>
-      liked ? previous.filter((item) => item !== postId) : [...previous, postId],
-    )
-    setCommunityPosts((previous) =>
-      previous.map((post) =>
-        post.id === postId ? { ...post, likes: liked ? Math.max(0, post.likes - 1) : post.likes + 1 } : post,
-      ),
+    appendCommandConversation(
+      intent.text,
+      '可以说“下一步”“计时三分钟”，也可以直接问做菜问题',
     )
   }
 
-  const handlePublishCommunityPost = (payload: { title: string; content: string; tags: string[] }) => {
-    setCommunityPosts((previous) => [
-      {
-        id: `post-${Date.now()}`,
-        author: '我',
-        title: payload.title,
-        content: payload.content,
-        likes: 0,
-        tags: payload.tags,
-        isMine: true,
-      },
-      ...previous,
-    ])
-  }
-
-  const handleAddCommunityComment = (payload: { postId: string; content: string }) => {
-    if (!isLoggedIn) {
+  const listenOnce = async () => {
+    if (isListeningOnce) {
       return
     }
 
-    setCommunityCommentsByPostId((previous) => ({
-      ...previous,
-      [payload.postId]: [
-        ...(previous[payload.postId] ?? []),
-        {
-          id: `comment-${Date.now()}`,
-          author: currentUserLabel,
-          content: payload.content,
-          createdAt: new Date().toISOString(),
-        },
-      ],
-    }))
-  }
-
-  const myCommunityPosts = communityPosts.filter((post) => post.isMine)
-  const myRecipes = app.recipesData.filter((recipe) => authState?.user.id && recipe.ownerUserId === authState.user.id)
-  const favoriteRecipes = app.recipesData.filter((recipe) => favoriteRecipeIds.includes(recipe.id))
-  const recentHistoryRecipes = app.history
-    .map((entry) => ({
-      entry,
-      recipe: app.recipesData.find((recipe) => recipe.id === entry.recipeId) ?? null,
-    }))
-    .filter((item): item is { entry: (typeof app.history)[number]; recipe: (typeof app.recipesData)[number] } => Boolean(item.recipe))
-    .filter((item, index, all) => all.findIndex((candidate) => candidate.entry.recipeId === item.entry.recipeId) === index)
-    .slice(0, 6)
-
-  const toggleFavoriteRecipe = (recipeId: string) => {
-    setFavoriteRecipeIds((previous) =>
-      previous.includes(recipeId) ? previous.filter((item) => item !== recipeId) : [recipeId, ...previous],
-    )
-  }
-
-  const clearRecentSearches = () => {
-    setRecentSearches([])
-  }
-
-  const handleLoginSubmit = async () => {
-    const identifier = loginIdentifier.trim()
-    const password = loginPassword.trim()
-    if (!identifier || !password) {
-      return
-    }
+    setIsListeningOnce(true)
+    setVoiceNotice('正在听，请说一句短命令。')
 
     try {
-      const session = await loginOrRegister(identifier, password)
-      setAuthState(session)
-      setLoginPassword('')
-      app.setReloadNonce((previous) => previous + 1)
-      app.setNotice(session.isNewUser ? '已创建账户并登录。' : '登录成功。')
+      const transcript = await recognizeSpeechOnce()
+
+      if (!transcript) {
+        throw new Error('当前设备不支持语音识别，仍可使用按钮和文字提问。')
+      }
+
+      await handleVoiceTranscript(transcript)
     } catch (error) {
-      app.setNotice(error instanceof Error ? error.message : '登录失败，请稍后再试。')
-    }
-  }
-
-  const handleLogout = async () => {
-    await logoutSession()
-    setAuthState(null)
-    setLoginIdentifier('')
-    setLoginPassword('')
-    app.setReloadNonce((previous) => previous + 1)
-    app.setNotice('已退出登录。')
-  }
-
-  const handleProfileViewChange = (nextView: ProfileView) => {
-    scrollPositionsRef.current[`tab:profile:${profileView}`] = getScrollTop()
-    setProfileView(nextView)
-  }
-
-  const handleCreateRecipe = async (payload: Parameters<typeof createRecipeDraft>[0]) => {
-    if (!isLoggedIn) {
-      app.setNotice('请先登录再创建菜谱。')
-      return
-    }
-
-    setIsCreatingRecipe(true)
-    try {
-      const recipe = await createRecipeDraft(payload)
-      app.setReloadNonce((previous) => previous + 1)
-      app.setSelectedRecipeId(recipe.id)
-      app.setNotice('菜谱已保存为私有。')
-    } catch (error) {
-      app.setNotice(error instanceof Error ? error.message : '创建菜谱失败。')
+      setVoiceNotice(error instanceof Error ? error.message : '语音识别失败，请再试一次。')
     } finally {
-      setIsCreatingRecipe(false)
+      setIsListeningOnce(false)
     }
   }
 
-  const handleToggleRecipeVisibility = async (recipeId: string, visibility: 'public' | 'private') => {
-    if (!isLoggedIn) {
-      app.setNotice('请先登录。')
-      return
-    }
+  const speechAvailable = isNativeSpeechPlatform() || isSpeechRecognitionSupported()
+  const voiceStatus: VoiceStatus = !speechAvailable
+    ? 'unsupported'
+    : isListeningOnce
+      ? 'listening'
+      : 'idle'
 
-    try {
-      await updateRecipeVisibility(recipeId, visibility)
-      app.setReloadNonce((previous) => previous + 1)
-      app.setNotice(visibility === 'public' ? '菜谱已公开，其他用户可以看到了。' : '菜谱已设为私有。')
-    } catch (error) {
-      app.setNotice(error instanceof Error ? error.message : '更新菜谱状态失败。')
-    }
-  }
-
-  const handleSaveServerBaseUrl = () => {
-    const nextUrl = serverBaseUrlDraft.trim()
-    if (!isValidApiBaseUrl(nextUrl)) {
-      setServerConnectionStatus('地址格式不对，请填写 http:// 或 https:// 开头的服务器地址。')
-      return
-    }
-
-    const normalized = setConfiguredApiBaseUrl(nextUrl)
-    setServerBaseUrl(normalized)
-    setServerBaseUrlDraft(normalized)
-    setServerConnectionStatus(normalized ? `已保存服务器地址：${normalized}` : '已恢复为打包时的默认服务器地址。')
-    app.setReloadNonce((previous) => previous + 1)
-  }
-
-  const handleResetServerBaseUrl = () => {
-    const normalized = resetConfiguredApiBaseUrl()
-    setServerBaseUrl(normalized)
-    setServerBaseUrlDraft(normalized)
-    setServerConnectionStatus('已清除自定义服务器地址，正在使用打包时默认配置。')
-    app.setReloadNonce((previous) => previous + 1)
-  }
-
-  const handleTestServerConnection = async () => {
-    const targetUrl = serverBaseUrlDraft.trim()
-    if (!isValidApiBaseUrl(targetUrl)) {
-      setServerConnectionStatus('地址格式不对，请填写 http:// 或 https:// 开头的服务器地址。')
-      return
-    }
-
-    setIsTestingServerConnection(true)
-    setServerConnectionStatus('正在测试服务器连接...')
-
-    try {
-      const payload = await testApiServer(targetUrl)
-      setServerConnectionStatus(payload.status === 'ok' ? '连接成功，服务器可用。' : '服务器有响应，但状态不是 ok。')
-    } catch (error) {
-      setServerConnectionStatus(error instanceof Error ? `连接失败：${error.message}` : '连接失败，请检查地址和穿透服务。')
-    } finally {
-      setIsTestingServerConnection(false)
-    }
-  }
-
-  return (
-    <div className={`app-shell ${isCookingFlow ? 'app-shell-cooking' : 'app-shell-mobile'}`}>
-      {app.notice && (
-        <div className="notice-banner">
-          <span>{app.notice}</span>
-          <button className="ghost-button small-button" onClick={() => app.setNotice(null)}>
-            收起
+  if (stage === 'landing') {
+    return (
+      <main className="app-shell-mobile competition-shell">
+        <section className="panel competition-hero">
+          <span className="section-kicker">复赛演示主链路</span>
+          <h1>导入做菜视频，生成一步一屏跟做</h1>
+          <p>
+            上传本地视频后，系统会读取真实时长、抽帧、OCR，并用 AI 生成结构化菜谱。证据不足时会明确失败，不返回演示假菜谱。
+          </p>
+          <input
+            ref={fileInputRef}
+            className="demo-file-input"
+            type="file"
+            accept="video/*"
+            onChange={(event) => {
+              void handleLocalVideo(event.currentTarget.files?.[0] ?? null)
+              event.currentTarget.value = ''
+            }}
+          />
+          <button className="primary-button competition-primary-action" onClick={() => fileInputRef.current?.click()}>
+            导入本地视频
           </button>
-        </div>
-      )}
+        </section>
 
-      {isCookingFlow ? (
-        <>
-          {app.screen === 'prep' && app.selectedRecipe && (
-            <PrepScreen
-              selectedRecipe={app.selectedRecipe}
-              prepPlan={app.prepPlan}
-              servings={app.prepServings}
-              missingIngredients={app.prepMissingIngredients}
-              isLoading={app.isPrepPlanLoading}
-              error={app.prepPlanError}
-              onBack={() => {
-                app.setScreen('discover')
-                openHomeEntry('detail', app.selectedRecipe?.id ?? null)
-              }}
-              onServingsChange={app.setPrepServings}
-              onToggleMissingIngredient={app.toggleMissingIngredient}
-              onMissingAmountChange={app.updateMissingIngredientAmount}
-              onRefreshPlan={app.refreshPrepPlan}
-              onStartCooking={app.startCooking}
-            />
-          )}
+      </main>
+    )
+  }
 
-          {app.screen === 'cook' && app.selectedRecipe && app.currentStep && (
-            <CookScreen
-              selectedRecipe={app.selectedRecipe}
-              currentStep={app.currentStep}
-              currentStepIndex={app.currentStepIndex}
-              timerLeft={app.timerLeft}
-              isTimerRunning={app.isTimerRunning}
-              voiceEnabled={app.voiceEnabled}
-              voiceStatus={app.voiceStatus}
-              lastVoiceCommand={app.lastVoiceCommand}
-              wakeWords={app.wakeWords}
-              liveCoachNote={app.liveCoachNote}
-              messages={app.messages}
-              quickPrompts={app.quickPrompts}
-              assistantInput={app.assistantInput}
-              isAssistantLoading={app.isAssistantLoading}
-              isFinishing={app.isFinishing}
-              onBackToDiscover={() => {
-                app.setScreen('discover')
-                app.disableVoice()
-              }}
-              onJumpToStep={app.jumpToStep}
-              onToggleTimer={() => app.setIsTimerRunning((previous) => !previous)}
-              onResetTimer={() => {
-                app.setTimerLeft(app.currentStep.durationMinutes * 60)
-                app.setIsTimerRunning(false)
-              }}
-              onToggleVoice={() => {
-                void app.toggleVoice()
-              }}
-              onPromptClick={(question) => {
-                void app.submitAssistantQuestion(question)
-              }}
-              onAssistantInputChange={app.setAssistantInput}
-              onAssistantSubmit={() => {
-                const question = app.assistantInput.trim()
-                if (!question) {
-                  return
-                }
-
-                void app.submitAssistantQuestion(question)
-                app.setAssistantInput('')
-              }}
-              onFinishCooking={() => {
-                void app.finishCooking()
-              }}
-            />
-          )}
-
-          {app.screen === 'finish' && app.selectedRecipe && (
-            <FinishScreen
-              selectedRecipe={app.selectedRecipe}
-              recommendations={app.recommendations}
-              historyCount={app.history.length}
-              currentRecipeCompletions={app.currentRecipeCompletions}
-              isFavorite={app.selectedRecipe ? favoriteRecipeIds.includes(app.selectedRecipe.id) : false}
-              onRestartRecipe={app.startCooking}
-              onToggleFavorite={() => {
-                if (app.selectedRecipe) {
-                  toggleFavoriteRecipe(app.selectedRecipe.id)
-                }
-              }}
-              onOpenCurrentRecipeDetail={() => {
-                if (app.selectedRecipe) {
-                  app.setSelectedRecipeId(app.selectedRecipe.id)
-                }
-                app.setScreen('discover')
-                openHomeEntry('detail', app.selectedRecipe?.id ?? null)
-              }}
-              onOpenRecentHistory={() => {
-                app.setScreen('discover')
-                openHomeEntry('history')
-              }}
-              onOpenCommunity={() => {
-                app.setScreen('discover')
-                handleTabChange('community')
-              }}
-              onOpenRecipe={(recipeId) => {
-                app.setSelectedRecipeId(recipeId)
-                app.setScreen('discover')
-                openHomeEntry('detail', recipeId)
-              }}
-              onBackToDiscover={() => {
-                app.setScreen('discover')
-                openHomeEntry('default')
-              }}
-            />
-          )}
-        </>
-      ) : (
-        <div className="mobile-app-frame">
-          <div className="mobile-app-content">
-            {isImportScreenOpen ? (
-              <ImportScreen
-                onBack={closeImportScreen}
-                recipesData={app.recipesData}
-                requestedEntry={importScreenEntryRequest}
-                onImportCompleted={() => {
-                  app.setReloadNonce((previous) => previous + 1)
-                }}
-                onOpenGeneratedRecipe={(recipeId) => {
-                  pendingGeneratedRecipeIdRef.current = recipeId
-                  app.setSelectedRecipeId(recipeId)
-                  app.setReloadNonce((previous) => previous + 1)
-                }}
-              />
-            ) : isSearchScreenOpen ? (
-              <SearchHubScreen
-                recipesData={app.recipesData}
-                searchQuery={app.searchQuery}
-                onSearchQueryChange={app.setSearchQuery}
-                recentSearches={recentSearches}
-                onSaveRecentSearch={saveRecentSearch}
-                onClearRecentSearches={clearRecentSearches}
-                onOpenRecipe={(recipeId) => {
-                  saveRecentSearch(app.searchQuery)
-                  setReturnToSearchAfterDetail(true)
-                  app.setSelectedRecipeId(recipeId)
-                  app.setScreen('discover')
-                  setIsSearchScreenOpen(false)
-                  openHomeEntry('detail', recipeId)
-                }}
-              />
-            ) : (
-              <>
-                {activeTab === 'home' && (
-                  <HomeScreen
-                    selectedRecipe={app.selectedRecipe}
-                    recipesData={app.recipesData}
-                    searchQuery={app.searchQuery}
-                    difficulty={app.difficulty as any}
-                    timeLimit={app.timeLimit}
-                    isRecipesLoading={app.isRecipesLoading}
-                    isHistoryLoading={app.isHistoryLoading}
-                    recipesError={app.recipesError}
-                    historyCount={app.history.length}
-              history={app.history}
-              currentRecipeCompletions={app.currentRecipeCompletions}
-                    requestedEntry={homeEntryRequest}
-                    favoriteRecipeIds={favoriteRecipeIds}
-                    ongoingCookingSession={lastCookingSession}
-                    onStartCooking={(recipeId) => {
-                      setIsHomeDetailOpen(false)
-                      setHomeView('default')
-                      setReturnToSearchAfterDetail(false)
-                      if (recipeId) {
-                        app.openPrep(recipeId)
-                        return
-                      }
-
-                      app.openPrep()
-                    }}
-                    onResumeCooking={(recipeId, stepIndex) => app.resumeCooking(recipeId, stepIndex)}
-                    onToggleFavorite={toggleFavoriteRecipe}
-                    onRetry={app.retryLoading}
-                    onSelectRecipe={(recipeId) => {
-                      app.setSelectedRecipeId(recipeId)
-                      app.setScreen('discover')
-                    }}
-                    onSearchQueryChange={app.setSearchQuery}
-                    onDifficultyChange={app.setDifficulty as any}
-                    onTimeLimitChange={app.setTimeLimit}
-                    onSearchEntryClick={openSearchScreen}
-                    onImportEntryClick={openImportScreen}
-                    onDetailOpenChange={setIsHomeDetailOpen}
-                    onViewChange={setHomeView}
-                    onDetailBackToSearch={
-                      returnToSearchAfterDetail
-                        ? () => {
-                            setReturnToSearchAfterDetail(false)
-                            setIsSearchScreenOpen(true)
-                          }
-                        : undefined
-                    }
-                  />
-                )}
-
-                {activeTab === 'community' && (
-                  <CommunityScreen
-                    posts={communityPosts}
-                    commentsByPostId={communityCommentsByPostId}
-                    requestedPostId={communityDetailRequest}
-                    likedPostIds={likedPostIds}
-                    isLoggedIn={isLoggedIn}
-                    currentUserLabel={currentUserLabel}
-                    onToggleLikePost={handleToggleLikeCommunityPost}
-                    onPublishPost={handlePublishCommunityPost}
-                    onAddComment={handleAddCommunityComment}
-                  />
-                )}
-                {activeTab === 'profile' && (
-                  <ProfileScreen
-                    isLoggedIn={isLoggedIn}
-                    loginIdentifier={loginIdentifier}
-                    loginPassword={loginPassword}
-                    currentUserLabel={currentUserLabel}
-                    favoriteRecipes={favoriteRecipes}
-                    recentHistoryItems={recentHistoryRecipes}
-                    myPosts={myCommunityPosts}
-                    myRecipes={myRecipes}
-                    isCreatingRecipe={isCreatingRecipe}
-                    view={profileView}
-                    serverBaseUrl={serverBaseUrl}
-                    serverBaseUrlDraft={serverBaseUrlDraft}
-                    serverConnectionStatus={serverConnectionStatus}
-                    isTestingServerConnection={isTestingServerConnection}
-                    onViewChange={handleProfileViewChange}
-                    onLoginIdentifierChange={setLoginIdentifier}
-                    onLoginPasswordChange={setLoginPassword}
-                    onLoginSubmit={() => {
-                      void handleLoginSubmit()
-                    }}
-                    onLogout={() => {
-                      void handleLogout()
-                    }}
-                    onCreateRecipe={(payload) => {
-                      void handleCreateRecipe(payload)
-                    }}
-                    onToggleRecipeVisibility={(recipeId, visibility) => {
-                      void handleToggleRecipeVisibility(recipeId, visibility)
-                    }}
-                    onServerBaseUrlDraftChange={setServerBaseUrlDraft}
-                    onSaveServerBaseUrl={handleSaveServerBaseUrl}
-                    onResetServerBaseUrl={handleResetServerBaseUrl}
-                    onTestServerConnection={() => {
-                      void handleTestServerConnection()
-                    }}
-                    onOpenFavoriteRecipe={(recipeId) => openHomeEntry('detail', recipeId)}
-                    onOpenHistoryRecipe={(recipeId) => openHomeEntry('detail', recipeId)}
-                    onOpenImportHistory={openImportHistoryEntry}
-                    onOpenMyPost={(postId) => {
-                      setCommunityDetailRequest(postId)
-                      handleTabChange('community')
-                    }}
-                  />
-                )}
-              </>
-            )}
-          </div>
-
-          {shouldShowBottomTabBar ? (
-            <nav className="bottom-tab-bar bottom-tab-bar-compact" aria-label="主导航">
-              {tabItems.map((item) => (
-                <button
-                  key={item.id}
-                  className={`bottom-tab-item ${activeTab === item.id ? 'bottom-tab-item-active' : ''}`}
-                  onClick={() => handleTabChange(item.id)}
-                >
-                  <span className="bottom-tab-icon" aria-hidden="true">
-                    {item.icon}
-                  </span>
-                  <span>{item.label}</span>
-                </button>
-              ))}
-            </nav>
-          ) : isSearchScreenOpen || isImportScreenOpen ? (
-            <div className="bottom-tab-bar bottom-tab-bar-search-return">
-              <button
-                className="bottom-tab-item bottom-tab-item-active"
-                onClick={isImportScreenOpen ? closeImportScreen : closeSearchScreen}
-              >
-                <span className="bottom-tab-icon" aria-hidden="true">
-                  ←
-                </span>
-                <span>返回首页</span>
-              </button>
+  if (stage === 'analyzing') {
+    return (
+      <main className="app-shell-mobile competition-shell">
+        <section className="panel competition-hero">
+          <span className="section-kicker">AI 解析中</span>
+          <h1>正在生成可信菜谱</h1>
+          <p>{analysisMessage}</p>
+          {selectedFile ? (
+            <div className="demo-file-summary">
+              <strong>{selectedFile.name}</strong>
+              <span>{formatFileSize(selectedFile.size)}</span>
             </div>
           ) : null}
-        </div>
-      )}
-    </div>
-  )
+          <div className="import-progress-track">
+            <div className="import-progress-value competition-progress-value" />
+          </div>
+        </section>
+      </main>
+    )
+  }
+
+  if (stage === 'failed') {
+    return (
+      <main className="app-shell-mobile competition-shell">
+        <section className="panel competition-hero competition-failure">
+          <span className="section-kicker">解析失败</span>
+          <h1>无法生成可信菜谱</h1>
+          <p>{failure?.message ?? '视频解析失败。'}</p>
+          <ul className="demo-compact-list">
+            <li><span>视频</span><strong>{failure?.uploadedVideo?.originalName ?? selectedFile?.name ?? '未知'}</strong></li>
+            <li><span>真实时长</span><strong>{failure?.uploadedVideo?.durationLabel ?? '未知'}</strong></li>
+            <li><span>失败阶段</span><strong>{failure?.error_type ?? 'UNKNOWN'}</strong></li>
+            <li><span>关键帧</span><strong>{failure?.evidence.frameCount ?? 0} 张</strong></li>
+            <li><span>OCR 文本</span><strong>{failure?.evidence.ocrTextCount ?? 0} 条</strong></li>
+          </ul>
+          <p>{failure?.nextStep ?? '请稍后重试。'}</p>
+          <div className="competition-actions">
+            <button className="primary-button" onClick={() => fileInputRef.current?.click()}>重新导入</button>
+            <button className="ghost-button" onClick={resetFlow}>返回首页</button>
+          </div>
+          <input
+            ref={fileInputRef}
+            className="demo-file-input"
+            type="file"
+            accept="video/*"
+            onChange={(event) => {
+              void handleLocalVideo(event.currentTarget.files?.[0] ?? null)
+              event.currentTarget.value = ''
+            }}
+          />
+        </section>
+      </main>
+    )
+  }
+
+  if (stage === 'prep' && recipe && prepPlan) {
+    return (
+      <div className="app-shell-mobile">
+        <PrepScreen
+          selectedRecipe={recipe}
+          prepPlan={prepPlan}
+          servings={prepServings}
+          missingIngredients={missingIngredients}
+          isLoading={false}
+          error={null}
+          onBack={resetFlow}
+          onServingsChange={setPrepServings}
+          onToggleMissingIngredient={(name, defaultAmount) => {
+            setMissingIngredients((previous) =>
+              previous.some((item) => item.name === name)
+                ? previous.filter((item) => item.name !== name)
+                : [...previous, { name, amount: defaultAmount }],
+            )
+          }}
+          onMissingAmountChange={(name, amount) => {
+            setMissingIngredients((previous) =>
+              previous.map((item) => (item.name === name ? { ...item, amount } : item)),
+            )
+          }}
+          onRefreshPlan={() => undefined}
+          onStartCooking={() => {
+            jumpToStep(0)
+            setStage('cook')
+          }}
+        />
+      </div>
+    )
+  }
+
+  if (stage === 'cook' && recipe && currentStep) {
+    return (
+      <div className="app-shell-cooking">
+        <CookScreen
+          selectedRecipe={recipe}
+          currentStep={currentStep}
+          currentStepIndex={currentStepIndex}
+          voiceEnabled={isListeningOnce}
+          voiceStatus={voiceStatus}
+          autoPlayRequest={cookAutoPlayRequest}
+          messages={messages}
+          assistantInput={assistantInput}
+          isAssistantLoading={isAssistantLoading}
+          isFinishing={false}
+          onBackToDiscover={() => setStage('prep')}
+          onJumpToStep={jumpToStep}
+          onStartTimer={(durationSeconds) => {
+            setTimerLeft(durationSeconds)
+            setIsTimerRunning(true)
+          }}
+          onToggleVoice={() => void listenOnce()}
+          onCommandFeedback={appendCommandConversation}
+          onPromptClick={(question) => void submitAssistantQuestion(question)}
+          onAssistantInputChange={setAssistantInput}
+          onAssistantSubmit={() => {
+            const question = assistantInput.trim()
+            setAssistantInput('')
+            void submitAssistantQuestion(question)
+          }}
+          onFinishCooking={() => {
+            setIsListeningOnce(false)
+            setIsTimerRunning(false)
+            setStage('finish')
+          }}
+        />
+      </div>
+    )
+  }
+
+  if (stage === 'finish' && recipe) {
+    return (
+      <main className="app-shell-mobile competition-shell">
+        <section className="panel finish-panel competition-finish">
+          <span className="section-kicker">完成</span>
+          <h1>{recipe.title} 已经完成</h1>
+          <p className="finish-copy">这条复赛主链路已经走完：导入视频、AI 解析、备菜、跟做和完成。</p>
+          <div className="finish-actions">
+            <button
+              className="primary-button"
+              onClick={() => {
+                jumpToStep(0)
+                setStage('cook')
+              }}
+            >
+              再跟做一次
+            </button>
+            <button className="ghost-button" onClick={resetFlow}>返回导入首页</button>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
+  return null
 }
 
 export default App

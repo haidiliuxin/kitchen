@@ -269,6 +269,12 @@ npm run lint
 - PPT 手机截图资源
 - 项目流程与展示文档
 
+## Integration Docs
+
+- vivo AIGC voice integration: `docs/integrations/vivo-aigc-voice-integration.md`
+
+This document includes notes for ASR, TTS, Function Calling, and AppKey authentication.
+
 ## License
 
 当前仓库暂未声明开源许可证。如需公开发布或多人协作，建议补充明确的 License 文件。

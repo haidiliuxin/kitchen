@@ -11,6 +11,8 @@ node_modules
 dist
 dist-ssr
 server-dist
+tmp/
+tmp-test/
 android/.gradle
 android/app/build
 android/build

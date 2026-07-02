@@ -3,11 +3,16 @@ import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import express from 'express'
+import { AsrError, parseMultipartAudioUpload, transcribeShortAudio } from './asr.js'
 import { getUserByToken, registerOrLoginUser, revokeAuthToken } from './auth.js'
 import type { AuthUser } from './auth.js'
 import { getAiRuntimeInfo, getKitchenCoachReply } from './ai.js'
+import { analyzeDemoVideo } from './demoAnalyze.js'
+import { getDemoCoachReply } from './demoCoach.js'
+import { analyzeLocalVideoUpload } from './localVideoAnalyze.js'
 import { createDatabase, databaseFilePath } from './database.js'
 import { importRecipeFromUrl } from './importer.js'
+import { getPublicUploadRoot } from './videoProcessing.js'
 import {
   createPrepPlan,
   getCookingHistory,
@@ -219,6 +224,7 @@ app.use((request, response, next) => {
 })
 
 app.use(express.json())
+app.use('/demo-uploads', express.static(getPublicUploadRoot()))
 
 app.get('/api/health', (_request, response) => {
   response.json({
@@ -231,6 +237,125 @@ app.get('/api/health', (_request, response) => {
     timestamp: new Date().toISOString(),
   })
 })
+
+app.post('/api/demo/analyze-video', async (_request, response) => {
+  const result = await analyzeDemoVideo()
+  response.json(result)
+})
+
+app.post(
+  '/api/demo/analyze-local-video',
+  express.raw({ type: () => true, limit: '500mb' }),
+  async (request, response) => {
+    const contentType = request.headers['content-type']
+    if (typeof contentType !== 'string' || !contentType.includes('multipart/form-data')) {
+      response.status(400).json({ message: '请使用 FormData 上传本地视频。' })
+      return
+    }
+
+    const hostHeader = request.headers.host ?? `${host}:${port}`
+    const publicBaseUrl = `${request.protocol}://${hostHeader}`
+
+    try {
+      const result = await analyzeLocalVideoUpload({
+        contentType,
+        body: Buffer.isBuffer(request.body) ? request.body : Buffer.from([]),
+        publicBaseUrl,
+      })
+      response.json(result)
+    } catch (error) {
+      response.status(400).json({
+        message: error instanceof Error ? error.message : '本地视频解析失败。',
+      })
+    }
+  },
+)
+
+app.post('/api/demo/coach-reply', async (request, response) => {
+  const recipeName = request.body?.recipeName
+  const currentStep = request.body?.currentStep
+  const userQuestion = request.body?.userQuestion
+
+  if (typeof userQuestion !== 'string' || !userQuestion.trim()) {
+    response.status(400).json({ message: '请先输入问题。' })
+    return
+  }
+
+  if (!currentStep || typeof currentStep !== 'object') {
+    response.status(400).json({ message: 'currentStep 是必填项。' })
+    return
+  }
+
+  const stepRecord = currentStep as Record<string, unknown>
+  const result = await getDemoCoachReply({
+    recipeName: typeof recipeName === 'string' ? recipeName : '当前菜谱',
+    currentStep: {
+      title: typeof stepRecord.title === 'string' ? stepRecord.title : '当前步骤',
+      instruction: typeof stepRecord.instruction === 'string' ? stepRecord.instruction : '',
+      tips: Array.isArray(stepRecord.tips)
+        ? stepRecord.tips.filter((item): item is string => typeof item === 'string')
+        : [],
+      commonMistakes: Array.isArray(stepRecord.commonMistakes)
+        ? stepRecord.commonMistakes.filter((item): item is string => typeof item === 'string')
+        : [],
+    },
+    userQuestion,
+  })
+
+  response.json(result)
+})
+
+app.post(
+  '/api/demo/asr',
+  express.raw({ type: () => true, limit: '20mb' }),
+  async (request, response) => {
+    const contentType = request.headers['content-type']
+    if (typeof contentType !== 'string' || !contentType.includes('multipart/form-data')) {
+      response.status(400).json({ success: false, error_type: 'BAD_REQUEST', message: '请使用 FormData 上传短音频。' })
+      return
+    }
+
+    try {
+      const { file, fields } = parseMultipartAudioUpload(
+        contentType,
+        Buffer.isBuffer(request.body) ? request.body : Buffer.from([]),
+      )
+      const mockText = fields.mockText || request.headers['x-demo-asr-text']
+      if (
+        typeof mockText === 'string'
+        && mockText.trim()
+        && (process.env.NODE_ENV !== 'production' || process.env.ASR_ALLOW_MOCK === 'true')
+      ) {
+        response.json({ success: true, text: mockText.trim(), raw: { mock: true } })
+        return
+      }
+
+      if (!file) {
+        response.status(400).json({ success: false, error_type: 'BAD_REQUEST', message: '没有收到音频文件。' })
+        return
+      }
+
+      const result = await transcribeShortAudio(file.buffer)
+      response.json({ success: true, text: result.text, raw: result.raw })
+    } catch (error) {
+      if (error instanceof AsrError) {
+        response.status(error.type === 'ASR_MISSING_CONFIG' ? 503 : 502).json({
+          success: false,
+          error_type: error.type,
+          message: error.message,
+          raw: error.raw,
+        })
+        return
+      }
+
+      response.status(500).json({
+        success: false,
+        error_type: 'ASR_REQUEST_FAILED',
+        message: error instanceof Error ? error.message : 'ASR 识别失败。',
+      })
+    }
+  },
+)
 
 app.post('/api/auth/login', (request, response) => {
   const identifier = request.body?.identifier
