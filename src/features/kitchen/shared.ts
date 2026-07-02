@@ -1,5 +1,6 @@
 import { Capacitor } from '@capacitor/core'
 import { TextToSpeech } from '@capacitor-community/text-to-speech'
+import type { SpeechSynthesisVoice as NativeSpeechSynthesisVoice } from '@capacitor-community/text-to-speech'
 import type { CSSProperties } from 'react'
 import type { Difficulty, Recipe } from '../../types.js'
 
@@ -57,19 +58,66 @@ export function recipeCardStyle(recipe: Recipe): CSSProperties {
   }
 }
 
+let preferredNativeVoiceIndex: number | undefined
+
+function isChineseVoice(voice: Pick<NativeSpeechSynthesisVoice, 'lang' | 'name'>): boolean {
+  const lang = voice.lang.toLowerCase()
+  const name = voice.name.toLowerCase()
+  return lang.startsWith('zh') || name.includes('chinese') || name.includes('mandarin') || name.includes('中文')
+}
+
+async function getPreferredNativeVoiceIndex(): Promise<number | undefined> {
+  if (preferredNativeVoiceIndex !== undefined) {
+    return preferredNativeVoiceIndex
+  }
+
+  try {
+    const { voices } = await TextToSpeech.getSupportedVoices()
+    const exactChineseIndex = voices.findIndex((voice) => voice.lang.toLowerCase() === 'zh-cn')
+    const anyChineseIndex = voices.findIndex(isChineseVoice)
+    const selectedIndex = exactChineseIndex >= 0 ? exactChineseIndex : anyChineseIndex
+    preferredNativeVoiceIndex = selectedIndex >= 0 ? selectedIndex : undefined
+  } catch {
+    preferredNativeVoiceIndex = undefined
+  }
+
+  return preferredNativeVoiceIndex
+}
+
+function getPreferredWebVoice(): SpeechSynthesisVoice | undefined {
+  const voices = window.speechSynthesis.getVoices()
+  return (
+    voices.find((voice) => voice.lang.toLowerCase() === 'zh-cn') ??
+    voices.find((voice) => voice.lang.toLowerCase().startsWith('zh')) ??
+    voices.find((voice) => voice.name.toLowerCase().includes('chinese')) ??
+    voices.find((voice) => voice.name.toLowerCase().includes('mandarin'))
+  )
+}
+
+function normalizeSpeechText(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, '这段内容可以看屏幕。')
+    .replace(/[`*_#>\-[\]()>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 export async function speak(text: string): Promise<void> {
-  if (!text.trim()) {
+  const speechText = normalizeSpeechText(text)
+  if (!speechText) {
     return
   }
 
   if (Capacitor.isNativePlatform()) {
+    const voice = await getPreferredNativeVoiceIndex()
     await TextToSpeech.stop().catch(() => undefined)
     await TextToSpeech.speak({
-      text,
+      text: speechText,
       lang: 'zh-CN',
-      rate: 1.0,
+      rate: 0.95,
       pitch: 1.0,
       volume: 1.0,
+      voice,
     })
     return
   }
@@ -78,9 +126,28 @@ export async function speak(text: string): Promise<void> {
     return
   }
 
-  const utterance = new SpeechSynthesisUtterance(text)
-  utterance.lang = 'zh-CN'
-  utterance.rate = 1.02
-  window.speechSynthesis.cancel()
-  window.speechSynthesis.speak(utterance)
+  return new Promise((resolve) => {
+    const utterance = new SpeechSynthesisUtterance(speechText)
+    utterance.lang = 'zh-CN'
+    utterance.rate = 0.98
+    const voice = getPreferredWebVoice()
+    if (voice) {
+      utterance.voice = voice
+    }
+    utterance.onend = () => resolve()
+    utterance.onerror = () => resolve()
+    window.speechSynthesis.cancel()
+    window.speechSynthesis.speak(utterance)
+  })
+}
+
+export async function stopSpeak(): Promise<void> {
+  if (Capacitor.isNativePlatform()) {
+    await TextToSpeech.stop().catch(() => undefined)
+    return
+  }
+
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel()
+  }
 }

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { formatTimer } from './shared.js'
-import type { Recipe, Step } from '../../types.js'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
+import { formatTimer, speak, stopSpeak } from './shared.js'
 import type { ChatMessage, VoiceStatus } from './shared.js'
+import type { Recipe, Step } from '../../types.js'
 import { buildMediaProxyUrl } from '../../lib/api.js'
 
 type CookScreenProps = {
@@ -36,6 +36,15 @@ type StepMedia =
 type StepVideoSegment = {
   startSeconds: number
   endSeconds: number
+}
+
+type StepVideoOverlayProps = {
+  title: string
+  media: StepMedia
+  segment?: StepVideoSegment
+  posterUrl?: string
+  onClose: () => void
+  onPlaybackComplete: () => void
 }
 
 function parseVideoUrl(value: string): URL | null {
@@ -138,126 +147,6 @@ function resolveStepMedia(mediaUrl: string, segment?: StepVideoSegment): StepMed
   return { kind: 'external', url: trimmedUrl }
 }
 
-type StepVideoOverlayProps = {
-  title: string
-  media: StepMedia
-  segment?: StepVideoSegment
-  posterUrl?: string
-  onClose: () => void
-}
-
-function StepVideoOverlay({
-  title,
-  media,
-  segment,
-  posterUrl,
-  onClose,
-}: StepVideoOverlayProps) {
-  const overlayRef = useRef<HTMLDivElement | null>(null)
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-
-  const closeOverlay = useCallback(() => {
-    videoRef.current?.pause()
-    if (document.fullscreenElement) {
-      void document.exitFullscreen().catch(() => undefined)
-    }
-    onClose()
-  }, [onClose])
-
-  useEffect(() => {
-    const overlay = overlayRef.current
-    const video = videoRef.current
-    if (!video || media.kind !== 'video') {
-      return
-    }
-
-    let closed = false
-    const startSeconds = segment?.startSeconds ?? 0
-    const endSeconds = segment?.endSeconds
-
-    const closeOnce = () => {
-      if (closed) {
-        return
-      }
-      closed = true
-      video.pause()
-      if (document.fullscreenElement) {
-        void document.exitFullscreen().catch(() => undefined)
-      }
-      closeOverlay()
-    }
-
-    const seekAndPlay = () => {
-      video.currentTime = Math.max(0, startSeconds)
-      void video.play().catch(() => undefined)
-    }
-
-    const handleTimeUpdate = () => {
-      if (typeof endSeconds === 'number' && video.currentTime >= endSeconds) {
-        closeOnce()
-      }
-    }
-
-    video.addEventListener('timeupdate', handleTimeUpdate)
-    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
-      seekAndPlay()
-    } else {
-      video.addEventListener('loadedmetadata', seekAndPlay, { once: true })
-    }
-
-    if (overlay?.requestFullscreen) {
-      void overlay.requestFullscreen().catch(() => undefined)
-    }
-
-    return () => {
-      closed = true
-      video.pause()
-      video.removeEventListener('timeupdate', handleTimeUpdate)
-      video.removeEventListener('loadedmetadata', seekAndPlay)
-    }
-  }, [closeOverlay, media, segment?.endSeconds, segment?.startSeconds])
-
-  return (
-    <div className="step-video-overlay" ref={overlayRef} role="dialog" aria-modal="true">
-      <header className="step-video-overlay-header">
-        <div>
-          <span>当前片段</span>
-          <strong>{title}</strong>
-          <p>
-            {segment
-              ? `${formatTimer(segment.startSeconds)} - ${formatTimer(segment.endSeconds)}`
-              : '暂无对应视频片段'}
-          </p>
-        </div>
-        <button className="ghost-button step-video-overlay-close" onClick={closeOverlay}>
-          关闭
-        </button>
-      </header>
-
-      <div className="step-video-overlay-stage">
-        {media.kind === 'video' ? (
-          <video
-            ref={videoRef}
-            className="step-video-overlay-player"
-            src={media.url}
-            poster={posterUrl}
-            controls
-            playsInline
-            preload="metadata"
-          />
-        ) : (
-          <div className="step-video-overlay-empty">
-            <strong>视频暂不可播放</strong>
-            <p>当前步骤没有可直接播放的视频地址，请先使用手动步骤继续跟做。</p>
-          </div>
-        )}
-      </div>
-
-      <p className="step-video-overlay-hint">播放结束后将自动回到当前步骤。</p>
-    </div>
-  )
-}
-
 function shouldProxyVideoUrl(url: string): boolean {
   const lowerUrl = url.toLowerCase()
   return (
@@ -292,6 +181,138 @@ function getStepVideoSegment(recipe: Recipe, stepIndex: number): StepVideoSegmen
   return undefined
 }
 
+function buildStepCoachMessage(step: Step): string {
+  const parts: string[] = []
+  parts.push(`这一步是“${step.title}”。${step.instruction}`)
+
+  const primaryTip = step.checkpoints?.[0] ?? step.sensoryCue
+  if (primaryTip) {
+    parts.push(primaryTip)
+  }
+
+  const mistake = step.commonMistakes?.[0]
+  if (mistake) {
+    parts.push(`注意不要${mistake.replace(/[。！？.!?]$/, '')}。`)
+  }
+
+  return parts.slice(0, 4).join(' ')
+}
+
+function isBootAssistantMessage(message: ChatMessage, index: number): boolean {
+  return (
+    index === 0 &&
+    message.role === 'assistant' &&
+    (/我会结合当前步骤/.test(message.text) || /已生成《/.test(message.text) || /已根据视频解析出/.test(message.text))
+  )
+}
+
+function StepVideoOverlay({
+  title,
+  media,
+  segment,
+  posterUrl,
+  onClose,
+  onPlaybackComplete,
+}: StepVideoOverlayProps) {
+  const overlayRef = useRef<HTMLDivElement | null>(null)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+
+  const closeOverlay = useCallback(() => {
+    videoRef.current?.pause()
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined)
+    }
+    onClose()
+  }, [onClose])
+
+  useEffect(() => {
+    const overlay = overlayRef.current
+    const video = videoRef.current
+    if (!video || media.kind !== 'video') {
+      return
+    }
+
+    let closed = false
+    const startSeconds = segment?.startSeconds ?? 0
+    const endSeconds = segment?.endSeconds
+
+    const closeAfterPlayback = () => {
+      if (closed) {
+        return
+      }
+      closed = true
+      video.pause()
+      onPlaybackComplete()
+      closeOverlay()
+    }
+
+    const seekAndPlay = () => {
+      video.currentTime = Math.max(0, startSeconds)
+      void video.play().catch(() => undefined)
+    }
+
+    const handleTimeUpdate = () => {
+      if (typeof endSeconds === 'number' && video.currentTime >= endSeconds) {
+        closeAfterPlayback()
+      }
+    }
+
+    video.addEventListener('timeupdate', handleTimeUpdate)
+    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      seekAndPlay()
+    } else {
+      video.addEventListener('loadedmetadata', seekAndPlay, { once: true })
+    }
+
+    if (overlay?.requestFullscreen) {
+      void overlay.requestFullscreen().catch(() => undefined)
+    }
+
+    return () => {
+      closed = true
+      video.pause()
+      video.removeEventListener('timeupdate', handleTimeUpdate)
+      video.removeEventListener('loadedmetadata', seekAndPlay)
+    }
+  }, [closeOverlay, media, onPlaybackComplete, segment?.endSeconds, segment?.startSeconds])
+
+  return (
+    <div className="step-video-overlay" ref={overlayRef} role="dialog" aria-modal="true">
+      <header className="step-video-overlay-header">
+        <div>
+          <span>当前片段</span>
+          <strong>{title}</strong>
+          <p>{segment ? `${formatTimer(segment.startSeconds)} - ${formatTimer(segment.endSeconds)}` : '暂无对应视频片段'}</p>
+        </div>
+        <button className="ghost-button step-video-overlay-close" onClick={closeOverlay}>
+          关闭
+        </button>
+      </header>
+
+      <div className="step-video-overlay-stage">
+        {media.kind === 'video' ? (
+          <video
+            ref={videoRef}
+            className="step-video-overlay-player"
+            src={media.url}
+            poster={posterUrl}
+            controls
+            playsInline
+            preload="metadata"
+          />
+        ) : (
+          <div className="step-video-overlay-empty">
+            <strong>视频暂不可播放</strong>
+            <p>当前步骤没有可直接播放的视频地址，请先使用手动步骤继续跟做。</p>
+          </div>
+        )}
+      </div>
+
+      <p className="step-video-overlay-hint">播放结束后将自动回到当前步骤。</p>
+    </div>
+  )
+}
+
 export function CookScreen({
   selectedRecipe,
   currentStep,
@@ -316,9 +337,15 @@ export function CookScreen({
   const [isVideoOverlayOpen, setIsVideoOverlayOpen] = useState(false)
   const [videoNotice, setVideoNotice] = useState('')
   const [autoPlayStepIndex, setAutoPlayStepIndex] = useState<number | null>(null)
+  const [coachHighlightToken, setCoachHighlightToken] = useState(0)
+  const [isSpeakingStep, setIsSpeakingStep] = useState(false)
   const lastAutoPlayRequestRef = useRef(autoPlayRequest)
   const hasPlayedInitialSegmentRef = useRef(false)
+  const lastVideoSpokenStepRef = useRef<number | null>(null)
+  const voicePointerHandledRef = useRef(false)
   const chatLogRef = useRef<HTMLDivElement | null>(null)
+  const stepCoachBubbleRef = useRef<HTMLElement | null>(null)
+
   const mediaUrl = currentStep.video?.url ?? ''
   const stepVideoSegment = getStepVideoSegment(selectedRecipe, currentStepIndex)
   const stepMedia = resolveStepMedia(mediaUrl, stepVideoSegment)
@@ -329,14 +356,32 @@ export function CookScreen({
           url: buildMediaProxyUrl(stepMedia.url, currentStep.video?.creditUrl ?? selectedRecipe.steps[0]?.video?.creditUrl),
         }
       : stepMedia
+  const stepCoachMessage = useMemo(() => buildStepCoachMessage(currentStep), [currentStep])
+  const visibleMessages = messages.filter((message, index) => !isBootAssistantMessage(message, index))
 
-  const visibleMessages = messages.filter((message, index) => {
-    if (index > 0 || message.role !== 'assistant') {
-      return true
-    }
+  useEffect(() => {
+    setCoachHighlightToken((previous) => previous + 1)
+  }, [currentStepIndex])
 
-    return !/我会结合当前步骤|已根据视频解析出/.test(message.text)
-  })
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const chatLog = chatLogRef.current
+      if (chatLog) {
+        chatLog.scrollTo({
+          top: 0,
+          behavior: 'smooth',
+        })
+        return
+      }
+
+      stepCoachBubbleRef.current?.scrollIntoView({
+        block: 'start',
+        behavior: 'smooth',
+      })
+    }, 80)
+
+    return () => window.clearTimeout(timer)
+  }, [currentStepIndex, coachHighlightToken])
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -353,6 +398,77 @@ export function CookScreen({
 
     return () => window.cancelAnimationFrame(frame)
   }, [visibleMessages.length, isAssistantLoading])
+
+  const startStepCoachSpeech = useCallback(async () => {
+    setIsSpeakingStep(true)
+    try {
+      await speak(stepCoachMessage)
+    } finally {
+      setIsSpeakingStep(false)
+    }
+  }, [stepCoachMessage])
+
+  const toggleStepCoachSpeech = useCallback(() => {
+    if (isSpeakingStep) {
+      void stopSpeak().finally(() => setIsSpeakingStep(false))
+      return
+    }
+
+    void startStepCoachSpeech()
+  }, [isSpeakingStep, startStepCoachSpeech])
+
+  useEffect(() => {
+    void stopSpeak().finally(() => setIsSpeakingStep(false))
+  }, [currentStepIndex])
+
+  useEffect(() => {
+    return () => {
+      void stopSpeak()
+    }
+  }, [])
+
+  const handleVideoPlaybackComplete = useCallback(() => {
+    setCoachHighlightToken((previous) => previous + 1)
+    if (lastVideoSpokenStepRef.current !== currentStepIndex) {
+      lastVideoSpokenStepRef.current = currentStepIndex
+      void startStepCoachSpeech()
+    }
+  }, [currentStepIndex, startStepCoachSpeech])
+
+  const triggerVoiceCommand = useCallback(() => {
+    void stopSpeak().finally(() => setIsSpeakingStep(false))
+    onToggleVoice()
+  }, [onToggleVoice])
+
+  const handleVoicePointerDown = useCallback((event: PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    voicePointerHandledRef.current = true
+    triggerVoiceCommand()
+    window.setTimeout(() => {
+      voicePointerHandledRef.current = false
+    }, 350)
+  }, [triggerVoiceCommand])
+
+  const handleVoiceClick = useCallback(() => {
+    if (voicePointerHandledRef.current) {
+      return
+    }
+
+    triggerVoiceCommand()
+  }, [triggerVoiceCommand])
+
+  const handleVoiceKeyDown = useCallback((event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return
+    }
+
+    event.preventDefault()
+    voicePointerHandledRef.current = true
+    triggerVoiceCommand()
+    window.setTimeout(() => {
+      voicePointerHandledRef.current = false
+    }, 350)
+  }, [triggerVoiceCommand])
 
   const openStepVideo = useCallback(() => {
     if (!mediaUrl.trim()) {
@@ -386,6 +502,11 @@ export function CookScreen({
     onJumpToStep(nextIndex)
     onCommandFeedback('下一步', '已切换到下一步')
   }, [currentStepIndex, onCommandFeedback, onFinishCooking, onJumpToStep, selectedRecipe.steps.length])
+
+  const goToPreviousStep = useCallback(() => {
+    onJumpToStep(currentStepIndex - 1)
+    onCommandFeedback('上一步', currentStepIndex === 0 ? '已经是第一步了' : '已返回上一步')
+  }, [currentStepIndex, onCommandFeedback, onJumpToStep])
 
   const playCurrentStepVideo = useCallback(() => {
     openStepVideo()
@@ -425,7 +546,7 @@ export function CookScreen({
   return (
     <main className="cook-layout cook-layout-focused">
       <header className="cook-header cook-header-focused">
-        <button className="back-button ghost-button small-button" onClick={onBackToDiscover}>
+        <button className="back-button ghost-button small-button cook-back-button" onClick={onBackToDiscover}>
           <span className="back-button-icon" aria-hidden="true">←</span>
           <span>返回备菜</span>
         </button>
@@ -447,102 +568,103 @@ export function CookScreen({
         </div>
       </header>
 
-      <section className="panel coach-panel cook-page-section cook-support-section cook-support-focused">
-        <div className="coach-command-grid coach-command-grid-focused">
-          <section className="voice-panel voice-panel-hero voice-panel-compact">
-            <button
-              className={`toggle-button voice-toggle voice-toggle-large ${voiceEnabled ? 'voice-toggle-active' : ''}`}
-              onClick={onToggleVoice}
-              aria-pressed={voiceEnabled}
-            >
-              <span className="voice-toggle-dot" aria-hidden="true" />
-              <span>{voiceEnabled ? '正在听...' : '点击说话'}</span>
-            </button>
-            {voiceStatus === 'unsupported' ? (
-              <p className="voice-support-note">当前设备不支持语音识别，可直接用下方按钮和右侧文字提问。</p>
-            ) : null}
-            <div className="voice-command-grid">
-              <button className="prompt-chip" onClick={goToNextStep}>
-                下一步
-              </button>
-              <button className="prompt-chip" onClick={playCurrentStepVideo}>
-                播放视频
-              </button>
-              <button
-                className="prompt-chip"
-                onClick={() => {
-                  onStartTimer(180)
-                  onCommandFeedback('计时三分钟', '已开始 3 分钟计时')
-                }}
-              >
-                计时三分钟
-              </button>
-              <button
-                className="prompt-chip"
-                onClick={() => {
-                  onPromptClick('锅糊了怎么办')
-                }}
-                disabled={isAssistantLoading}
-              >
-                锅糊了怎么办
-              </button>
-            </div>
-          </section>
-
-          <section className="chat-panel coach-answer-panel">
-            <div className="coach-answer-heading">
-              <h3>小白厨房教练</h3>
-            </div>
-            <div className="chat-log" ref={chatLogRef}>
-              {visibleMessages.map((message) => (
-                <article
-                  key={message.id}
-                  className={`chat-bubble ${
-                    message.role === 'assistant' ? 'assistant-bubble' : 'user-bubble'
-                  }`}
-                >
-                  <span>{message.role === 'assistant' ? '小白' : '我'}</span>
-                  <p>{message.text}</p>
-                </article>
-              ))}
-              {isAssistantLoading && (
-                <article className="chat-bubble assistant-bubble">
-                  <span>小白</span>
-                  <p>正在结合当前菜谱和步骤状态生成回答...</p>
-                </article>
-              )}
-            </div>
-
-            <form
-              className="chat-form"
-              onSubmit={(event) => {
-                event.preventDefault()
-                onAssistantSubmit()
-              }}
-            >
-              <textarea
-                value={assistantInput}
-                onChange={(event) => onAssistantInputChange(event.target.value)}
-                rows={3}
-                placeholder="例如：这一步做到什么程度算好？或者：火要多大？"
-              />
-              <button className="primary-button" type="submit" disabled={isAssistantLoading}>
-                {isAssistantLoading ? '小白正在思考...' : '问小白'}
-              </button>
-            </form>
-          </section>
+      <section className="panel voice-panel voice-panel-compact cook-voice-strip">
+        <button
+          className={`toggle-button voice-toggle voice-toggle-large ${voiceEnabled ? 'voice-toggle-active' : ''}`}
+          onPointerDown={handleVoicePointerDown}
+          onClick={handleVoiceClick}
+          onKeyDown={handleVoiceKeyDown}
+          aria-pressed={voiceEnabled}
+        >
+          <span className="voice-toggle-dot" aria-hidden="true" />
+          <span>{voiceEnabled ? '正在听...' : '点击说话'}</span>
+        </button>
+        {voiceStatus === 'unsupported' ? (
+          <p className="voice-support-note">当前设备不支持语音识别，可直接使用按钮和文字提问。</p>
+        ) : null}
+        <div className="voice-command-grid">
+          <button className="prompt-chip" onClick={goToNextStep}>
+            下一步
+          </button>
+          <button className="prompt-chip" onClick={playCurrentStepVideo}>
+            播放视频
+          </button>
+          <button
+            className="prompt-chip"
+            onClick={() => {
+              onStartTimer(180)
+              onCommandFeedback('计时三分钟', '已开始 3 分钟计时')
+            }}
+          >
+            计时三分钟
+          </button>
+          <button
+            className="prompt-chip"
+            onClick={() => {
+              onPromptClick('锅糊了怎么办')
+            }}
+            disabled={isAssistantLoading}
+          >
+            锅糊了怎么办
+          </button>
         </div>
       </section>
 
-      <div className="step-nav step-nav-focused">
-        <button
-          className="ghost-button"
-          disabled={currentStepIndex === 0}
-          onClick={() => {
-            onJumpToStep(currentStepIndex - 1)
-            onCommandFeedback('上一步', '已返回上一步')
+      <section className="panel chat-panel coach-answer-panel cook-coach-panel">
+        <div className="coach-answer-heading">
+          <h3>小白厨房教练</h3>
+          <button className="ghost-button small-button" onClick={toggleStepCoachSpeech}>
+            {isSpeakingStep ? '停止朗读' : '朗读这一步'}
+          </button>
+        </div>
+        <div className="chat-log" ref={chatLogRef}>
+          <article
+            ref={stepCoachBubbleRef}
+            key={`step-${currentStepIndex}-${coachHighlightToken}`}
+            className="chat-bubble assistant-bubble step-coach-bubble"
+          >
+            <span>小白 · 当前步骤说明</span>
+            <p>{stepCoachMessage}</p>
+          </article>
+
+          {visibleMessages.map((message) => (
+            <article
+              key={message.id}
+              className={`chat-bubble ${message.role === 'assistant' ? 'assistant-bubble' : 'user-bubble'}`}
+            >
+              <span>{message.role === 'assistant' ? '小白' : '我'}</span>
+              <p>{message.text}</p>
+            </article>
+          ))}
+          {isAssistantLoading && (
+            <article className="chat-bubble assistant-bubble">
+              <span>小白</span>
+              <p>正在结合当前菜谱和步骤状态生成回答...</p>
+            </article>
+          )}
+        </div>
+
+        <form
+          className="chat-form"
+          onSubmit={(event) => {
+            event.preventDefault()
+            onAssistantSubmit()
           }}
         >
+          <textarea
+            value={assistantInput}
+            onChange={(event) => onAssistantInputChange(event.target.value)}
+            rows={3}
+            placeholder="例如：水淀粉是什么？要不要加番茄酱？"
+          />
+          <button className="primary-button" type="submit" disabled={isAssistantLoading}>
+            {isAssistantLoading ? '小白正在思考...' : '问 AI 教练'}
+          </button>
+        </form>
+      </section>
+
+      <div className="step-nav step-nav-focused">
+        <button className="ghost-button" disabled={currentStepIndex === 0} onClick={goToPreviousStep}>
           上一步
         </button>
         <button className="ghost-button step-nav-video-button" onClick={playCurrentStepVideo}>
@@ -566,6 +688,7 @@ export function CookScreen({
           segment={stepVideoSegment}
           posterUrl={currentStep.video?.posterUrl}
           onClose={() => setIsVideoOverlayOpen(false)}
+          onPlaybackComplete={handleVideoPlaybackComplete}
         />
       ) : null}
     </main>
