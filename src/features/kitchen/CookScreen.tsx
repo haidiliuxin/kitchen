@@ -11,6 +11,10 @@ type CookScreenProps = {
   voiceEnabled: boolean
   voiceStatus: VoiceStatus
   autoPlayRequest: number
+  timerLeft: number
+  timerVisible: boolean
+  timerFinished: boolean
+  isTimerRunning: boolean
   messages: ChatMessage[]
   assistantInput: string
   isAssistantLoading: boolean
@@ -18,6 +22,8 @@ type CookScreenProps = {
   onBackToDiscover: () => void
   onJumpToStep: (nextIndex: number) => void
   onStartTimer: (durationSeconds: number) => void
+  onToggleTimer: () => void
+  onCancelTimer: () => void
   onToggleVoice: () => void
   onCommandFeedback: (userText: string, assistantText: string) => void
   onPromptClick: (question: string) => void
@@ -216,6 +222,7 @@ function StepVideoOverlay({
 }: StepVideoOverlayProps) {
   const overlayRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const [isPlaybackBlocked, setIsPlaybackBlocked] = useState(false)
 
   const closeOverlay = useCallback(() => {
     videoRef.current?.pause()
@@ -224,6 +231,17 @@ function StepVideoOverlay({
     }
     onClose()
   }, [onClose])
+
+  const retryPlayback = useCallback(() => {
+    const video = videoRef.current
+    if (!video) {
+      return
+    }
+
+    video.currentTime = Math.max(0, segment?.startSeconds ?? 0)
+    setIsPlaybackBlocked(false)
+    void video.play().catch(() => setIsPlaybackBlocked(true))
+  }, [segment?.startSeconds])
 
   useEffect(() => {
     const overlay = overlayRef.current
@@ -248,7 +266,8 @@ function StepVideoOverlay({
 
     const seekAndPlay = () => {
       video.currentTime = Math.max(0, startSeconds)
-      void video.play().catch(() => undefined)
+      setIsPlaybackBlocked(false)
+      void video.play().catch(() => setIsPlaybackBlocked(true))
     }
 
     const handleTimeUpdate = () => {
@@ -274,7 +293,7 @@ function StepVideoOverlay({
       video.removeEventListener('timeupdate', handleTimeUpdate)
       video.removeEventListener('loadedmetadata', seekAndPlay)
     }
-  }, [closeOverlay, media, onPlaybackComplete, segment?.endSeconds, segment?.startSeconds])
+  }, [closeOverlay, media.kind, onPlaybackComplete, segment?.endSeconds, segment?.startSeconds])
 
   return (
     <div className="step-video-overlay" ref={overlayRef} role="dialog" aria-modal="true">
@@ -291,15 +310,26 @@ function StepVideoOverlay({
 
       <div className="step-video-overlay-stage">
         {media.kind === 'video' ? (
-          <video
-            ref={videoRef}
-            className="step-video-overlay-player"
-            src={media.url}
-            poster={posterUrl}
-            controls
-            playsInline
-            preload="metadata"
-          />
+          <>
+            <video
+              ref={videoRef}
+              className="step-video-overlay-player"
+              src={media.url}
+              poster={posterUrl}
+              controls
+              playsInline
+              preload="metadata"
+            />
+            {isPlaybackBlocked ? (
+              <div className="step-video-playback-prompt">
+                <strong>点击播放当前步骤视频</strong>
+                <p>设备限制了自动播放，点一下即可继续。</p>
+                <button className="primary-button" onClick={retryPlayback}>
+                  点击播放当前步骤视频
+                </button>
+              </div>
+            ) : null}
+          </>
         ) : (
           <div className="step-video-overlay-empty">
             <strong>视频暂不可播放</strong>
@@ -320,6 +350,10 @@ export function CookScreen({
   voiceEnabled,
   voiceStatus,
   autoPlayRequest,
+  timerLeft,
+  timerVisible,
+  timerFinished,
+  isTimerRunning,
   messages,
   assistantInput,
   isAssistantLoading,
@@ -327,6 +361,8 @@ export function CookScreen({
   onBackToDiscover,
   onJumpToStep,
   onStartTimer,
+  onToggleTimer,
+  onCancelTimer,
   onToggleVoice,
   onCommandFeedback,
   onPromptClick,
@@ -339,7 +375,7 @@ export function CookScreen({
   const [autoPlayStepIndex, setAutoPlayStepIndex] = useState<number | null>(null)
   const [coachHighlightToken, setCoachHighlightToken] = useState(0)
   const [isSpeakingStep, setIsSpeakingStep] = useState(false)
-  const lastAutoPlayRequestRef = useRef(autoPlayRequest)
+  const lastAutoPlayRequestRef = useRef(0)
   const hasPlayedInitialSegmentRef = useRef(false)
   const lastVideoSpokenStepRef = useRef<number | null>(null)
   const voicePointerHandledRef = useRef(false)
@@ -617,6 +653,28 @@ export function CookScreen({
             {isSpeakingStep ? '停止朗读' : '朗读这一步'}
           </button>
         </div>
+        {timerVisible || timerFinished ? (
+          <section className={`coach-timer-card ${timerFinished ? 'coach-timer-card-done' : ''}`}>
+            <span>小白正在帮你计时</span>
+            <strong>{timerFinished ? '时间到了' : formatTimer(timerLeft)}</strong>
+            <p className="coach-timer-step">{currentStep.title}</p>
+            <p>{timerFinished ? '时间到了，可以继续了' : '倒计时结束后，我会提醒你继续'}</p>
+            {timerFinished ? (
+              <button className="ghost-button small-button" onClick={onCancelTimer}>
+                收起
+              </button>
+            ) : (
+              <div className="coach-timer-actions">
+                <button className="ghost-button small-button" onClick={onToggleTimer}>
+                  {isTimerRunning ? '暂停' : '继续'}
+                </button>
+                <button className="ghost-button small-button" onClick={onCancelTimer}>
+                  取消
+                </button>
+              </div>
+            )}
+          </section>
+        ) : null}
         <div className="chat-log" ref={chatLogRef}>
           <article
             ref={stepCoachBubbleRef}

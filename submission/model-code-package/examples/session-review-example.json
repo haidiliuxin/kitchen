@@ -1,0 +1,40 @@
+{
+  "events": [
+    {
+      "type": "question",
+      "stepId": 1,
+      "stepTitle": "加水盐水淀粉打散鸡蛋",
+      "content": "水淀粉是什么？",
+      "timestamp": 1782985000000
+    },
+    {
+      "type": "voice_command",
+      "stepId": 2,
+      "stepTitle": "四成油温炒鸡蛋",
+      "content": "下一步",
+      "timestamp": 1782985030000
+    },
+    {
+      "type": "video_replay",
+      "stepId": 2,
+      "stepTitle": "四成油温炒鸡蛋",
+      "content": "播放视频",
+      "timestamp": 1782985040000
+    },
+    {
+      "type": "timer",
+      "stepId": 2,
+      "stepTitle": "四成油温炒鸡蛋",
+      "content": "计时三分钟",
+      "timestamp": 1782985050000
+    }
+  ],
+  "generatedReview": {
+    "comment": "你刚才问过「水淀粉是什么？」，这说明你不只是照着做，也在理解为什么这样做。像水淀粉这类小细节，理解了原理，下次就会更稳。",
+    "reminder": "下次炒蛋时，注意油温不要太高，看到边缘凝固后再轻轻推动，口感会更嫩。",
+    "eventCount": 4,
+    "questionCount": 1,
+    "videoReplayCount": 1,
+    "timerCount": 1
+  }
+}

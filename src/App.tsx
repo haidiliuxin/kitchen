@@ -435,8 +435,10 @@ function App() {
   const [importedVideoDuration, setImportedVideoDuration] = useState<number | undefined>(undefined)
   const [failure, setFailure] = useState<DemoAnalyzeFailureResponse | null>(null)
   const [currentStepIndex, setCurrentStepIndex] = useState(0)
-  const [, setTimerLeft] = useState(0)
+  const [timerLeft, setTimerLeft] = useState(0)
   const [isTimerRunning, setIsTimerRunning] = useState(false)
+  const [timerVisible, setTimerVisible] = useState(false)
+  const [timerFinished, setTimerFinished] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>(emptyMessages)
   const [assistantInput, setAssistantInput] = useState('')
   const [isAssistantLoading, setIsAssistantLoading] = useState(false)
@@ -492,6 +494,8 @@ function App() {
       setTimerLeft((previous) => {
         if (previous <= 1) {
           setIsTimerRunning(false)
+          setTimerFinished(true)
+          setTimerVisible(true)
           return 0
         }
 
@@ -501,6 +505,17 @@ function App() {
 
     return () => window.clearInterval(timer)
   }, [isTimerRunning])
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+      document.scrollingElement?.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+      document.documentElement.scrollTop = 0
+      document.body.scrollTop = 0
+    })
+
+    return () => window.cancelAnimationFrame(frame)
+  }, [stage])
 
   useEffect(() => {
     if (stage !== 'analyzing') {
@@ -535,6 +550,8 @@ function App() {
     setCurrentStepIndex(0)
     setTimerLeft(0)
     setIsTimerRunning(false)
+    setTimerVisible(false)
+    setTimerFinished(false)
     setIsListeningOnce(false)
     setMessages(emptyMessages)
     setAssistantInput('')
@@ -542,6 +559,29 @@ function App() {
     setVoiceNotice('')
     setMissingIngredients([])
     setCookAutoPlayRequest(0)
+  }
+
+  const startCookTimer = (durationSeconds: number) => {
+    setTimerLeft(durationSeconds)
+    setIsTimerRunning(true)
+    setTimerVisible(true)
+    setTimerFinished(false)
+  }
+
+  const toggleCookTimer = () => {
+    if (timerFinished || timerLeft <= 0) {
+      return
+    }
+
+    setIsTimerRunning((previous) => !previous)
+    setTimerVisible(true)
+  }
+
+  const cancelCookTimer = () => {
+    setTimerLeft(0)
+    setIsTimerRunning(false)
+    setTimerVisible(false)
+    setTimerFinished(false)
   }
 
   const loadDemoRecipeFromVideo = (
@@ -555,6 +595,8 @@ function App() {
     setPrepServings(nextRecipe.servings)
     setCurrentStepIndex(0)
     setTimerLeft(nextRecipe.steps[0]?.durationMinutes ? nextRecipe.steps[0].durationMinutes * 60 : 60)
+    setTimerVisible(false)
+    setTimerFinished(false)
     setMessages([
       createMessage('assistant', `已生成《${nextRecipe.title}》一步一屏跟做流程。进入跟做后可以点“点击说话”控制步骤或提问。`),
     ])
@@ -605,6 +647,8 @@ function App() {
     setCurrentStepIndex(safeIndex)
     setTimerLeft(recipe.steps[safeIndex].durationMinutes * 60)
     setIsTimerRunning(false)
+    setTimerVisible(false)
+    setTimerFinished(false)
   }
 
   const submitAssistantQuestion = async (question: string) => {
@@ -671,6 +715,8 @@ function App() {
         appendCommandConversation(safeTranscript, '已进入完成页')
         setStage('finish')
         setIsTimerRunning(false)
+        setTimerVisible(false)
+        setTimerFinished(false)
         return
       }
       recordSessionEvent('step_complete', '进入下一步')
@@ -704,8 +750,7 @@ function App() {
 
     if (intent.type === 'timer') {
       recordSessionEvent('timer', safeTranscript)
-      setTimerLeft(intent.durationSeconds)
-      setIsTimerRunning(true)
+      startCookTimer(intent.durationSeconds)
       appendCommandConversation(
         safeTranscript,
         `已开始 ${formatVoiceTimerDuration(intent.durationSeconds)} 计时`,
@@ -765,34 +810,25 @@ function App() {
               <span>会听 · 会看 · 会教的 AI 厨房教练</span>
             </div>
           </div>
-          <h1>
-            导入做菜视频
-            <span>生成一步一屏跟做流程</span>
-          </h1>
-          <p>
-            系统会读取视频时长，抽取关键画面并识别字幕文字，再由 AI 整理出食材、步骤和注意事项。
-          </p>
-          <div className="hero-capability-list" aria-label="核心能力">
-            <span>读取视频时长</span>
-            <span>抽帧 OCR</span>
-            <span>AI 生成菜谱</span>
+          <div className="product-home-action">
+            <p className="product-hero-note">
+              <span>将你收藏的视频保存到本地</span>
+              <span>然后直接交给小白就好啦！</span>
+            </p>
+            <input
+              ref={fileInputRef}
+              className="demo-file-input"
+              type="file"
+              accept="video/*"
+              onChange={(event) => {
+                void handleLocalVideo(event.currentTarget.files?.[0] ?? null)
+                event.currentTarget.value = ''
+              }}
+            />
+            <button className="primary-button competition-primary-action" onClick={() => fileInputRef.current?.click()}>
+              选择本地视频
+            </button>
           </div>
-          <input
-            ref={fileInputRef}
-            className="demo-file-input"
-            type="file"
-            accept="video/*"
-            onChange={(event) => {
-              void handleLocalVideo(event.currentTarget.files?.[0] ?? null)
-              event.currentTarget.value = ''
-            }}
-          />
-          <button className="primary-button competition-primary-action" onClick={() => fileInputRef.current?.click()}>
-            选择本地视频
-          </button>
-          <p className="product-hero-note">
-            如果视频中缺少字幕或画面文字，系统会提示证据不足，不会生成不可靠菜谱。
-          </p>
         </section>
 
       </main>
@@ -914,6 +950,7 @@ function App() {
           onRefreshPlan={() => undefined}
           onStartCooking={() => {
             jumpToStep(0)
+            setCookAutoPlayRequest((previous) => previous + 1)
             setStage('cook')
           }}
         />
@@ -931,6 +968,10 @@ function App() {
           voiceEnabled={isListeningOnce}
           voiceStatus={voiceStatus}
           autoPlayRequest={cookAutoPlayRequest}
+          timerLeft={timerLeft}
+          timerVisible={timerVisible}
+          timerFinished={timerFinished}
+          isTimerRunning={isTimerRunning}
           messages={messages}
           assistantInput={assistantInput}
           isAssistantLoading={isAssistantLoading}
@@ -938,9 +979,10 @@ function App() {
           onBackToDiscover={() => setStage('prep')}
           onJumpToStep={jumpToStep}
           onStartTimer={(durationSeconds) => {
-            setTimerLeft(durationSeconds)
-            setIsTimerRunning(true)
+            startCookTimer(durationSeconds)
           }}
+          onToggleTimer={toggleCookTimer}
+          onCancelTimer={cancelCookTimer}
           onToggleVoice={() => void listenOnce()}
           onCommandFeedback={(userText, assistantText) => {
             if (/播放/.test(userText)) {
@@ -968,6 +1010,8 @@ function App() {
             recordSessionEvent('step_complete', '出锅完成')
             setIsListeningOnce(false)
             setIsTimerRunning(false)
+            setTimerVisible(false)
+            setTimerFinished(false)
             setStage('finish')
           }}
         />
@@ -994,15 +1038,6 @@ function App() {
           </p>
         </section>
 
-        <section className="panel finish-review-card">
-          <span className="section-kicker">本次你完成了</span>
-          <div className="finish-flow-steps" aria-label="完成链路">
-            {['导入视频', 'AI 解析', '备菜确认', '一步一屏跟做', '出锅完成'].map((item) => (
-              <span key={item}>✓ {item}</span>
-            ))}
-          </div>
-        </section>
-
         <section className="panel finish-review-card finish-coach-card">
           <span className="section-kicker">小白点评</span>
           <p>{finishReview.comment}</p>
@@ -1013,7 +1048,7 @@ function App() {
           </div>
         </section>
 
-        <section className="panel finish-review-card">
+        <section className="panel finish-review-card finish-reminder-card">
           <span className="section-kicker">下次提醒</span>
           <p>{finishReview.reminder}</p>
         </section>
@@ -1029,6 +1064,7 @@ function App() {
             onClick={() => {
               setSessionEvents([])
               jumpToStep(0)
+              setCookAutoPlayRequest((previous) => previous + 1)
               setStage('cook')
             }}
           >

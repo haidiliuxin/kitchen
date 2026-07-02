@@ -1,0 +1,47 @@
+{
+  "videoName": "tomato-egg-demo.mp4",
+  "duration": {
+    "seconds": 64,
+    "label": "01:04"
+  },
+  "frames": [
+    {
+      "frameId": "frame-001",
+      "timestamp": 14,
+      "timeLabel": "00:14",
+      "imageUrl": "frames/frame-001.jpg"
+    },
+    {
+      "frameId": "frame-002",
+      "timestamp": 19,
+      "timeLabel": "00:19",
+      "imageUrl": "frames/frame-002.jpg"
+    },
+    {
+      "frameId": "frame-003",
+      "timestamp": 47,
+      "timeLabel": "00:47",
+      "imageUrl": "frames/frame-003.jpg"
+    }
+  ],
+  "ocrSegments": [
+    {
+      "frameId": "frame-001",
+      "timeSeconds": 14,
+      "timeLabel": "00:14",
+      "text": "西红柿去皮去蒂切碎"
+    },
+    {
+      "frameId": "frame-002",
+      "timeSeconds": 19,
+      "timeLabel": "00:19",
+      "text": "碗中打六个鸡蛋，加50g水，3g盐，加入少许水淀粉"
+    },
+    {
+      "frameId": "frame-003",
+      "timeSeconds": 47,
+      "timeLabel": "00:47",
+      "text": "调味加生抽20g，糖5g，倒入炒好的蛋焖炒，淋点红葱油"
+    }
+  ]
+}

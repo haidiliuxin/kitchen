@@ -1,0 +1,63 @@
+{
+  "recipeName": "西红柿炒蛋",
+  "estimatedTime": "约 1 分钟",
+  "servings": 2,
+  "ingredients": [
+    {
+      "name": "西红柿",
+      "amount": "3 个",
+      "note": "来自视频字幕和画面"
+    },
+    {
+      "name": "鸡蛋",
+      "amount": "6 个",
+      "note": "来自字幕：碗中打六个鸡蛋"
+    },
+    {
+      "name": "水",
+      "amount": "50g",
+      "note": "来自字幕"
+    },
+    {
+      "name": "水淀粉",
+      "amount": "半勺",
+      "note": "演示版本人工校准"
+    }
+  ],
+  "prepItems": [
+    {
+      "name": "西红柿",
+      "action": "去皮、去蒂、切碎"
+    },
+    {
+      "name": "鸡蛋",
+      "action": "加水、盐、水淀粉后打散"
+    }
+  ],
+  "steps": [
+    {
+      "stepId": "step-1",
+      "title": "西红柿去皮去蒂切碎",
+      "instruction": "把西红柿去皮、去蒂，再切碎。",
+      "startTime": 14,
+      "endTime": 19,
+      "duration": "约 5 秒",
+      "tips": ["切得细一点，后面更容易炒出番茄汁。"],
+      "commonMistakes": ["西红柿块太大，后面出汁慢。"],
+      "rescue": "如果切得偏大，后面炒西红柿时多炒一会儿，让它充分出汁。",
+      "keyFrameUrl": "frames/frame-001.jpg"
+    },
+    {
+      "stepId": "step-2",
+      "title": "加水盐水淀粉打散鸡蛋",
+      "instruction": "碗中打 6 个鸡蛋，加 50g 水、3g 盐，再加入半勺水淀粉搅拌均匀。",
+      "startTime": 19,
+      "endTime": 29,
+      "duration": "约 10 秒",
+      "tips": ["加入水淀粉，炒出来的蛋会更滑。"],
+      "commonMistakes": ["蛋液没有充分打散。"],
+      "rescue": "继续搅拌到蛋液颜色均匀，再下锅。",
+      "keyFrameUrl": "frames/frame-002.jpg"
+    }
+  ]
+}
