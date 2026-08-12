@@ -1,3 +1,7 @@
+# 历史资料：比赛期间 vivo AIGC 语音接入
+
+> 已归档，禁止生产使用。本文中的 vivo ASR、TTS、蓝心和通用凭据命名均不再属于 Kitchen 生产架构。当前仅保留 vivo OCR，并且只能使用 `OCR_VIVO_*`。实时语音请以 `docs/voice-architecture.md` 为准。
+
 # vivo AIGC Integration Notes for Claude
 
 This document summarizes the relevant vivo AIGC documentation needed for implementing voice interaction, TTS playback, Function Calling, and AppKey authentication.

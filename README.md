@@ -35,9 +35,8 @@
 
 AI：
 
-- 蓝心大模型兼容接口
-- MiniMax / 其他兼容模型可通过环境变量切换
-- 本地规则兜底回复
+- DeepSeek V4 Flash（非思考模式）
+- 本地确定性语音命令和云端不可用提示
 
 Android：
 
@@ -97,19 +96,27 @@ npm install
 cp .env.example .env
 ```
 
-常用配置：
+核心配置：
 
 ```env
 PORT=8787
 HOST=0.0.0.0
-AI_PROVIDER=lanxin
-LANXIN_MODEL=Doubao-Seed-2.0-mini
+DEEPSEEK_API_KEY=your_deepseek_api_key_here
+DEEPSEEK_MODEL=deepseek-v4-flash
+DOUBAO_SPEECH_APP_ID=your_doubao_speech_app_id_here
+DOUBAO_SPEECH_ACCESS_TOKEN=your_doubao_speech_access_token_here
+DOUBAO_ASR_RESOURCE_ID=volc.seedasr.sauc.duration
+DOUBAO_TTS_RESOURCE_ID=volc.service_type.10029
+DOUBAO_TTS_VOICE_TYPE=zh_female_vv_uranus_bigtts
+VOICE_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:8787,capacitor://localhost
 VIDEO_TRANSCRIPT_WEBHOOK_URL=http://127.0.0.1:8790/transcribe
 YT_DLP_BINARY_PATH=E:\kitchen-helper\data\tools\yt-dlp.exe
 VITE_API_BASE_URL=http://你的电脑局域网IP:8787
 ```
 
 不要把真实 API Key 提交到仓库。`.env.example` 只保留占位示例。
+
+语音生产路径固定为“端侧 KWS → 豆包 ASR → 本地意图/DeepSeek → 豆包 TTS”。当前仓库不包含 KWS 模型或 sherpa AAR；许可明确前 Android 会显示 `MODEL_MISSING`，系统语音识别仅供用户主动点击降级。详见 [语音架构](docs/voice-architecture.md) 与 [语音账户配置](docs/voice-account-setup.md)。
 
 ### 3. 启动 Web + 后端
 
@@ -219,7 +226,9 @@ android/app/build/outputs/apk/debug/app-debug.apk
 - `POST /api/imports/from-link`：从链接导入并生成菜谱。
 - `POST /api/imports/analyze`：导入链接并返回前端摘要。
 - `POST /api/assistant/reply`：AI 厨房教练问答。
-- `POST /api/voice/interpret`：语音文本解析。
+- `POST /api/voice/session-ticket`：签发 30 秒一次性 ASR WebSocket 票据。
+- `WS /api/voice/asr`：PCM 16 kHz 单声道实时识别代理。
+- `POST /api/voice/tts`：豆包 PCM 流式 TTS（SSE）。
 - `GET /api/media/proxy`：代理平台视频流，提升 Android WebView 播放稳定性。
 - `GET /api/history` / `POST /api/history`：做菜历史记录。
 

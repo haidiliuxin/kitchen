@@ -2,15 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import {
   analyzeLocalVideo,
-  askDemoCoach,
+  askAssistant,
   type DemoAnalyzeFailureResponse,
   type DemoAnalyzeVideoResponse,
   type DemoStructuredRecipe,
 } from './lib/api.js'
-import type { MissingIngredient, PrepPlan, Recipe, Step } from './types.js'
+import type { AssistantAnswer, CookingContext, MissingIngredient, PrepPlan, Recipe, Step } from './types.js'
 import { CookScreen } from './features/kitchen/CookScreen.js'
 import { PrepScreen } from './features/kitchen/PrepScreen.js'
-import { createMessage, speak, type ChatMessage, type VoiceStatus } from './features/kitchen/shared.js'
+import { createMessage, speak, type ChatMessage } from './features/kitchen/shared.js'
 import {
   createSpeechRecognition,
   ensureNativeSpeechPermission,
@@ -21,6 +21,17 @@ import {
   stopNativeRecognition,
 } from './features/kitchen/speechRecognition.js'
 import { parseVoiceIntent } from './features/kitchen/voiceIntent.js'
+import {
+  initialVoiceSnapshot,
+  VoiceController,
+  type VoiceProcessingResult,
+  type VoiceSnapshot,
+} from './features/kitchen/voiceController.js'
+import {
+  DoubaoSpeechToTextProvider,
+  DoubaoTextToSpeechProvider,
+  SherpaWakeWordProvider,
+} from './features/kitchen/voiceProviders.js'
 
 type DemoStage = 'landing' | 'analyzing' | 'prep' | 'cook' | 'finish' | 'failed'
 type CookingSessionEvent = {
@@ -443,12 +454,15 @@ function App() {
   const [assistantInput, setAssistantInput] = useState('')
   const [isAssistantLoading, setIsAssistantLoading] = useState(false)
   const [sessionEvents, setSessionEvents] = useState<CookingSessionEvent[]>([])
-  const [isListeningOnce, setIsListeningOnce] = useState(false)
-  const [, setVoiceNotice] = useState('')
+  const [voiceNotice, setVoiceNotice] = useState('')
+  const [voiceSnapshot, setVoiceSnapshot] = useState<VoiceSnapshot>(initialVoiceSnapshot)
   const [prepServings, setPrepServings] = useState(2)
   const [missingIngredients, setMissingIngredients] = useState<MissingIngredient[]>([])
   const [cookAutoPlayRequest, setCookAutoPlayRequest] = useState(0)
+  const [cookVideoCloseRequest, setCookVideoCloseRequest] = useState(0)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const voiceControllerRef = useRef<VoiceController | null>(null)
+  const voiceProcessorRef = useRef<((text: string, signal: AbortSignal) => Promise<VoiceProcessingResult>) | null>(null)
 
   const currentStep = recipe?.steps[currentStepIndex] ?? null
   const prepPlan = useMemo(
@@ -552,7 +566,7 @@ function App() {
     setIsTimerRunning(false)
     setTimerVisible(false)
     setTimerFinished(false)
-    setIsListeningOnce(false)
+    void voiceControllerRef.current?.disable()
     setMessages(emptyMessages)
     setAssistantInput('')
     setSessionEvents([])
@@ -651,39 +665,51 @@ function App() {
     setTimerFinished(false)
   }
 
-  const submitAssistantQuestion = async (question: string) => {
-    const safeQuestion = question.trim()
-    if (!recipe || !currentStep || !safeQuestion) {
-      return
+  const buildCookingContext = (): CookingContext | null => {
+    if (!recipe || !currentStep) return null
+    return {
+      recipeName: recipe.title,
+      currentStep: {
+        index: currentStepIndex,
+        total: recipe.steps.length,
+        title: currentStep.title,
+        instruction: currentStep.instruction,
+      },
+      timer: timerVisible ? { remainingSeconds: timerLeft, running: isTimerRunning } : null,
+      missingIngredients: missingIngredients.slice(0, 10).map((item) => item.name),
+      safetyNotes: [recipe.riskNote, ...currentStep.commonMistakes.slice(0, 2)].filter(Boolean),
+      conversation: messages.slice(-2).map((message) => ({ role: message.role, content: message.text })),
     }
+  }
+
+  const requestAssistantAnswer = async (question: string, signal?: AbortSignal): Promise<AssistantAnswer | null> => {
+    const safeQuestion = question.trim()
+    const context = buildCookingContext()
+    if (!context || !safeQuestion) return null
 
     recordSessionEvent('question', safeQuestion)
     setMessages((previous) => [...previous, createMessage('user', safeQuestion)].slice(-10))
     setIsAssistantLoading(true)
 
     try {
-      const response = await askDemoCoach({
-        recipeName: recipe.title,
-        currentStep: {
-          title: currentStep.title,
-          instruction: currentStep.instruction,
-          tips: currentStep.checkpoints,
-          commonMistakes: currentStep.commonMistakes,
-        },
-        userQuestion: safeQuestion,
-      })
+      const response = await askAssistant(context, safeQuestion, signal)
       setMessages((previous) => [...previous, createMessage('assistant', response.answer)].slice(-10))
-      void speak(response.answer).catch(() => undefined)
+      return response
     } catch (error) {
-      const fallbackAnswer = error instanceof Error ? error.message : '小白暂时没有连上，可以先按屏幕步骤继续。'
+      const fallbackAnswer = error instanceof Error ? error.message : '现在无法回答开放问题，本地步骤和计时仍可使用'
       setMessages((previous) => [
         ...previous,
         createMessage('assistant', fallbackAnswer),
       ].slice(-10))
-      void speak(fallbackAnswer).catch(() => undefined)
+      return null
     } finally {
       setIsAssistantLoading(false)
     }
+  }
+
+  const submitAssistantQuestion = async (question: string) => {
+    const response = await requestAssistantAnswer(question)
+    if (response) void speak(response.answer).catch(() => undefined)
   }
 
   const appendCommandConversation = useCallback((userText: string, assistantText: string) => {
@@ -694,15 +720,18 @@ function App() {
     ].slice(-10))
   }, [])
 
-  const handleVoiceTranscript = async (transcript: string) => {
+  const handleVoiceTranscript = async (
+    transcript: string,
+    signal = new AbortController().signal,
+  ): Promise<VoiceProcessingResult> => {
     if (!recipe || !currentStep) {
-      return
+      return { kind: 'local' }
     }
 
     const safeTranscript = transcript.trim()
     if (!safeTranscript) {
       setVoiceNotice('没有识别到内容，请再点一次说话。')
-      return
+      return { kind: 'local', recapture: true }
     }
 
     setVoiceNotice('')
@@ -717,13 +746,13 @@ function App() {
         setIsTimerRunning(false)
         setTimerVisible(false)
         setTimerFinished(false)
-        return
+        return { kind: 'local', disable: true }
       }
       recordSessionEvent('step_complete', '进入下一步')
       jumpToStep(currentStepIndex + 1)
       setCookAutoPlayRequest((previous) => previous + 1)
       appendCommandConversation(safeTranscript, '已切换到下一步')
-      return
+      return { kind: 'local', speech: '已切换到下一步' }
     }
 
     if (intent.type === 'prev_step') {
@@ -732,72 +761,107 @@ function App() {
         safeTranscript,
         currentStepIndex === 0 ? '已经是第一步了' : '已返回上一步',
       )
-      return
+      return { kind: 'local', speech: currentStepIndex === 0 ? '已经是第一步了' : '已返回上一步' }
     }
 
     if (intent.type === 'repeat_step') {
       appendCommandConversation(safeTranscript, '我再说一遍当前步骤')
-      await speak(`${currentStep.title}。${currentStep.voiceover}`)
-      return
+      return { kind: 'local', speech: `${currentStep.title}。${currentStep.voiceover}` }
     }
 
     if (intent.type === 'play_video') {
       recordSessionEvent('video_replay', safeTranscript)
       appendCommandConversation(safeTranscript, '正在播放当前步骤视频')
       setCookAutoPlayRequest((previous) => previous + 1)
-      return
+      return { kind: 'local', speech: '正在播放当前步骤视频' }
     }
 
-    if (intent.type === 'timer') {
+    if (intent.type === 'pause_video') {
+      setCookVideoCloseRequest((previous) => previous + 1)
+      appendCommandConversation(safeTranscript, '已停止播放视频')
+      return { kind: 'local', speech: '已停止播放视频' }
+    }
+
+    if (intent.type === 'timer_start') {
       recordSessionEvent('timer', safeTranscript)
       startCookTimer(intent.durationSeconds)
+      const answer = `已开始 ${formatVoiceTimerDuration(intent.durationSeconds)} 计时`
       appendCommandConversation(
         safeTranscript,
-        `已开始 ${formatVoiceTimerDuration(intent.durationSeconds)} 计时`,
+        answer,
       )
-      return
+      return { kind: 'local', speech: answer }
+    }
+
+    if (intent.type === 'timer_pause') {
+      if (isTimerRunning) setIsTimerRunning(false)
+      appendCommandConversation(safeTranscript, timerVisible ? '计时已暂停' : '当前没有计时')
+      return { kind: 'local', speech: timerVisible ? '计时已暂停' : '当前没有计时' }
+    }
+
+    if (intent.type === 'timer_resume') {
+      if (timerVisible && timerLeft > 0) setIsTimerRunning(true)
+      appendCommandConversation(safeTranscript, timerVisible ? '计时已继续' : '当前没有计时')
+      return { kind: 'local', speech: timerVisible ? '计时已继续' : '当前没有计时' }
+    }
+
+    if (intent.type === 'timer_cancel') {
+      cancelCookTimer()
+      appendCommandConversation(safeTranscript, '计时已取消')
+      return { kind: 'local', speech: '计时已取消' }
+    }
+
+    if (intent.type === 'timer_query') {
+      const answer = timerVisible ? `计时还剩 ${formatVoiceTimerDuration(timerLeft)}` : '当前没有计时'
+      appendCommandConversation(safeTranscript, answer)
+      return { kind: 'local', speech: answer }
+    }
+
+    if (intent.type === 'exit') {
+      appendCommandConversation(safeTranscript, '语音助手已关闭')
+      return { kind: 'local', speech: '语音助手已关闭', exit: true }
+    }
+
+    if (intent.type === 'wake_only') {
+      appendCommandConversation(safeTranscript, '我在，请说')
+      return { kind: 'local', speech: '我在，请说', recapture: true }
     }
 
     if (intent.type === 'question') {
-      await submitAssistantQuestion(intent.question)
-      return
+      const response = await requestAssistantAnswer(intent.question, signal)
+      return {
+        kind: 'ai',
+        speech: response?.answer,
+        budgetLimited: response?.errorCategory === 'budget_limited',
+      }
     }
 
     appendCommandConversation(
       intent.text,
       '可以说“下一步”“计时三分钟”，也可以直接问做菜问题',
     )
+    return { kind: 'local', speech: '可以说下一步、计时三分钟，也可以直接问做菜问题' }
   }
 
-  const listenOnce = async () => {
-    if (isListeningOnce) {
-      return
+  voiceProcessorRef.current = handleVoiceTranscript
+
+  useEffect(() => {
+    const controller = new VoiceController({
+      wakeWord: new SherpaWakeWordProvider(),
+      speechToText: new DoubaoSpeechToTextProvider(),
+      textToSpeech: new DoubaoTextToSpeechProvider(),
+      recognizeWithSystem: recognizeSpeechOnce,
+      classifyTranscript: (text) => parseVoiceIntent(text).type === 'question' ? 'ai' : 'local',
+      handleTranscript: (text, signal) => voiceProcessorRef.current?.(text, signal) ?? Promise.resolve({ kind: 'local' }),
+    })
+    voiceControllerRef.current = controller
+    const unsubscribe = controller.subscribe(setVoiceSnapshot)
+    return () => {
+      unsubscribe()
+      void controller.disable()
+      voiceControllerRef.current = null
     }
-
-    setIsListeningOnce(true)
-    setVoiceNotice('正在听，请说一句短命令。')
-
-    try {
-      const transcript = await recognizeSpeechOnce()
-
-      if (!transcript) {
-        throw new Error('当前设备不支持语音识别，仍可使用按钮和文字提问。')
-      }
-
-      await handleVoiceTranscript(transcript)
-    } catch (error) {
-      setVoiceNotice(error instanceof Error ? error.message : '语音识别失败，请再试一次。')
-    } finally {
-      setIsListeningOnce(false)
-    }
-  }
-
-  const speechAvailable = isNativeSpeechPlatform() || isSpeechRecognitionSupported()
-  const voiceStatus: VoiceStatus = !speechAvailable
-    ? 'unsupported'
-    : isListeningOnce
-      ? 'listening'
-      : 'idle'
+  }, [])
 
   if (stage === 'landing') {
     return (
@@ -965,9 +1029,11 @@ function App() {
           selectedRecipe={recipe}
           currentStep={currentStep}
           currentStepIndex={currentStepIndex}
-          voiceEnabled={isListeningOnce}
-          voiceStatus={voiceStatus}
+          voiceEnabled={!['disabled', 'unsupported', 'permission_denied', 'error'].includes(voiceSnapshot.state)}
+          voiceSnapshot={voiceSnapshot}
+          voiceNotice={voiceNotice}
           autoPlayRequest={cookAutoPlayRequest}
+          closeVideoRequest={cookVideoCloseRequest}
           timerLeft={timerLeft}
           timerVisible={timerVisible}
           timerFinished={timerFinished}
@@ -976,14 +1042,24 @@ function App() {
           assistantInput={assistantInput}
           isAssistantLoading={isAssistantLoading}
           isFinishing={false}
-          onBackToDiscover={() => setStage('prep')}
+          onBackToDiscover={() => {
+            void voiceControllerRef.current?.disable()
+            setStage('prep')
+          }}
           onJumpToStep={jumpToStep}
           onStartTimer={(durationSeconds) => {
             startCookTimer(durationSeconds)
           }}
           onToggleTimer={toggleCookTimer}
           onCancelTimer={cancelCookTimer}
-          onToggleVoice={() => void listenOnce()}
+          onToggleVoice={() => {
+            if (['disabled', 'unsupported', 'permission_denied', 'error'].includes(voiceSnapshot.state)) {
+              void voiceControllerRef.current?.enable()
+            }
+            else void voiceControllerRef.current?.disable()
+          }}
+          onSystemVoice={() => void voiceControllerRef.current?.captureWithSystemRecognizer()}
+          onStopVoice={() => void voiceControllerRef.current?.disable()}
           onCommandFeedback={(userText, assistantText) => {
             if (/播放/.test(userText)) {
               recordSessionEvent('video_replay', userText)
@@ -1008,7 +1084,7 @@ function App() {
           }}
           onFinishCooking={() => {
             recordSessionEvent('step_complete', '出锅完成')
-            setIsListeningOnce(false)
+            void voiceControllerRef.current?.disable()
             setIsTimerRunning(false)
             setTimerVisible(false)
             setTimerFinished(false)

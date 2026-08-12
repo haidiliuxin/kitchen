@@ -1,26 +1,19 @@
-import crypto from 'node:crypto'
+import type { AssistantAnswer, AssistantUsage, CookingContext } from '../src/types.js'
 
 type ChatMessage = {
   role: 'system' | 'user' | 'assistant'
   content: string
 }
 
-type ChatResponse = {
-  choices?: Array<{
-    message?: {
-      content?: string
-    }
-  }>
+type StreamChunk = {
+  choices?: Array<{ delta?: { content?: string } }>
+  usage?: {
+    prompt_tokens?: number
+    completion_tokens?: number
+  }
 }
 
-type AnthropicResponse = {
-  content?: Array<{
-    type?: string
-    text?: string
-  }>
-}
-
-export type LlmProvider = 'deepseek' | 'lanxin' | 'minimax'
+export type LlmProvider = 'deepseek'
 
 export type LlmRuntimeInfo = {
   configured: boolean
@@ -35,306 +28,306 @@ export type ChatCompletionOptions = {
   maxTokens?: number
   jsonMode?: boolean
   timeoutMs?: number
+  signal?: AbortSignal
 }
 
-function stripTrailingSlash(value: string): string {
-  return value.replace(/\/$/, '')
+export type ChatCompletionResult = {
+  content: string
+  usage: AssistantUsage
 }
 
-function getProvider(): LlmProvider {
-  const provider = process.env.AI_PROVIDER?.trim().toLowerCase()
-  if (provider === 'minimax') {
-    return 'minimax'
-  }
-
-  return provider === 'lanxin' ? 'lanxin' : 'deepseek'
+export interface LanguageModelProvider {
+  answer(context: CookingContext, question: string, signal: AbortSignal): Promise<AssistantAnswer>
 }
 
-function getLanxinApiKey(): string {
-  return (
-    process.env.LANXIN_API_KEY?.trim() ||
-    process.env.LANXIN_APP_KEY?.trim() ||
-    ''
-  )
-}
+export type LanguageModelErrorCategory =
+  | 'not_configured'
+  | 'rate_limited'
+  | 'upstream'
+  | 'timeout'
+  | 'aborted'
 
-function getLanxinAppId(): string {
-  return process.env.LANXIN_APP_ID?.trim() || ''
-}
-
-function getLanxinAuthMode(): 'bearer' | 'gateway' {
-  return process.env.LANXIN_AUTH_MODE === 'bearer' ? 'bearer' : 'gateway'
-}
-
-function appendRequestId(endpoint: URL): URL {
-  if (!endpoint.searchParams.has('request_id')) {
-    endpoint.searchParams.set('request_id', crypto.randomUUID())
-  }
-
-  return endpoint
-}
-
-function createNonce(length = 8): string {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
-  return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
-}
-
-function createGatewaySignedHeaders(
-  appId: string,
-  appKey: string,
-  method: string,
-  uri: string,
-  query: Record<string, string | number | boolean> = {},
-): Record<string, string> {
-  const timestamp = Math.floor(Date.now() / 1000).toString()
-  const nonce = createNonce()
-  const canonicalQueryString = Object.keys(query)
-    .sort()
-    .map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(String(query[key]))}`)
-    .join('&')
-  const signedHeadersString = [
-    `x-ai-gateway-app-id:${appId}`,
-    `x-ai-gateway-timestamp:${timestamp}`,
-    `x-ai-gateway-nonce:${nonce}`,
-  ].join('\n')
-  const signingString = [
-    method.toUpperCase(),
-    uri.startsWith('/') ? uri : `/${uri}`,
-    canonicalQueryString,
-    appId,
-    timestamp,
-    signedHeadersString,
-  ].join('\n')
-  const signature = crypto
-    .createHmac('sha256', appKey)
-    .update(Buffer.from(signingString, 'utf8'))
-    .digest('hex')
-  const encodedSignature = Buffer.from(signature, 'utf8').toString('base64')
-
-  return {
-    'X-AI-GATEWAY-APP-ID': appId,
-    'X-AI-GATEWAY-TIMESTAMP': timestamp,
-    'X-AI-GATEWAY-NONCE': nonce,
-    'X-AI-GATEWAY-SIGNED-HEADERS': 'x-ai-gateway-app-id;x-ai-gateway-timestamp;x-ai-gateway-nonce',
-    'X-AI-GATEWAY-SIGNATURE': encodedSignature,
+export class LanguageModelError extends Error {
+  constructor(
+    public readonly category: LanguageModelErrorCategory,
+    public readonly status?: number,
+  ) {
+    super(`DeepSeek request failed: ${category}`)
+    this.name = 'LanguageModelError'
   }
 }
 
-function getProviderConfig(): {
-  provider: LlmProvider
-  apiKey: string
-  baseUrl: string
-  model: string
-  timeoutMs: number
-  supportsJsonMode: boolean
-  lanxinAppId?: string
-  lanxinAuthMode?: 'bearer' | 'gateway'
-  protocol: 'openai' | 'anthropic'
-} {
-  const provider = getProvider()
+const DEFAULT_BASE_URL = 'https://api.deepseek.com'
+const DEFAULT_MODEL = 'deepseek-v4-flash'
 
-  if (provider === 'minimax') {
-    return {
-      provider,
-      apiKey: process.env.MINIMAX_API_KEY?.trim() || '',
-      baseUrl: stripTrailingSlash(
-        process.env.MINIMAX_BASE_URL?.trim() || 'https://api.minimaxi.com/anthropic',
-      ),
-      model: process.env.MINIMAX_MODEL?.trim() || 'MiniMax-M2.7',
-      timeoutMs: Number(process.env.MINIMAX_TIMEOUT_MS ?? process.env.DEEPSEEK_TIMEOUT_MS ?? 180000),
-      // Anthropic-compatible endpoints do not accept OpenAI response_format.
-      supportsJsonMode: false,
-      protocol: 'anthropic',
-    }
-  }
-
-  if (provider === 'lanxin') {
-    return {
-      provider,
-      apiKey: getLanxinApiKey(),
-      // 蓝心控制台截图中的 sk-xuanji-* 更像 OpenAI-compatible 代理密钥。
-      // 因此这里不硬编码官方 URL，优先要求由环境变量提供真实网关。
-      baseUrl: stripTrailingSlash(process.env.LANXIN_BASE_URL?.trim() || ''),
-      model: process.env.LANXIN_MODEL?.trim() || 'xuanji',
-      timeoutMs: Number(process.env.LANXIN_TIMEOUT_MS ?? process.env.DEEPSEEK_TIMEOUT_MS ?? 180000),
-      supportsJsonMode: process.env.LANXIN_JSON_MODE !== 'false',
-      lanxinAppId: getLanxinAppId(),
-      lanxinAuthMode: getLanxinAuthMode(),
-      protocol: 'openai',
-    }
+function getConfig() {
+  const baseUrl = (process.env.DEEPSEEK_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(/\/$/, '')
+  const endpoint = new URL(baseUrl)
+  if (endpoint.protocol !== 'https:' || endpoint.hostname !== 'api.deepseek.com') {
+    throw new LanguageModelError('not_configured')
   }
 
   return {
-    provider,
     apiKey: process.env.DEEPSEEK_API_KEY?.trim() || '',
-    baseUrl: stripTrailingSlash(process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com'),
-    model: process.env.DEEPSEEK_MODEL ?? 'deepseek-chat',
-    timeoutMs: Number(process.env.DEEPSEEK_TIMEOUT_MS ?? 180000),
-    supportsJsonMode: true,
-    protocol: 'openai',
+    baseUrl,
+    model: process.env.DEEPSEEK_MODEL?.trim() || DEFAULT_MODEL,
+    timeoutMs: Number(process.env.DEEPSEEK_TIMEOUT_MS ?? 12_000),
+  }
+}
+
+function estimateCost(inputTokens: number, outputTokens: number): number {
+  const inputRate = Number(process.env.VOICE_DEEPSEEK_INPUT_CNY_PER_MTOKENS ?? 1)
+  const outputRate = Number(process.env.VOICE_DEEPSEEK_OUTPUT_CNY_PER_MTOKENS ?? 2)
+  return Number(((inputTokens * inputRate + outputTokens * outputRate) / 1_000_000).toFixed(6))
+}
+
+function abortWith(signal: AbortSignal | undefined, timeoutMs: number) {
+  const controller = new AbortController()
+  let timedOut = false
+  const onAbort = () => controller.abort()
+  signal?.addEventListener('abort', onAbort, { once: true })
+  if (signal?.aborted) controller.abort()
+  const timeout = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
+
+  return {
+    signal: controller.signal,
+    timedOut: () => timedOut,
+    cleanup: () => {
+      clearTimeout(timeout)
+      signal?.removeEventListener('abort', onAbort)
+    },
+  }
+}
+
+function parseSseBlock(block: string): StreamChunk | null {
+  const data = block
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trim())
+    .join('')
+  if (!data || data === '[DONE]') {
+    return null
+  }
+
+  try {
+    return JSON.parse(data) as StreamChunk
+  } catch {
+    throw new LanguageModelError('upstream')
   }
 }
 
 export function isLlmConfigured(): boolean {
-  const config = getProviderConfig()
-  if (config.provider === 'lanxin' && config.lanxinAuthMode === 'gateway') {
-    return Boolean(config.apiKey && config.lanxinAppId && config.baseUrl && config.model)
+  try {
+    const config = getConfig()
+    return Boolean(config.apiKey && config.model)
+  } catch {
+    return false
   }
-
-  return Boolean(config.apiKey && config.baseUrl && config.model)
 }
 
 export function getLlmRuntimeInfo(): LlmRuntimeInfo {
-  const config = getProviderConfig()
-  return {
-    configured: isLlmConfigured(),
-    provider: config.provider,
-    model: config.model,
-    baseUrl: config.baseUrl,
+  let baseUrl = DEFAULT_BASE_URL
+  let model = DEFAULT_MODEL
+  try {
+    const config = getConfig()
+    baseUrl = config.baseUrl
+    model = config.model
+  } catch {
+    // Health output stays non-secret and deterministic for invalid configuration.
   }
+
+  return { configured: isLlmConfigured(), provider: 'deepseek', model, baseUrl }
 }
 
-function getAnthropicEndpoint(baseUrl: string): URL {
-  const uri = baseUrl.endsWith('/v1') ? '/messages' : '/v1/messages'
-  return new URL(`${baseUrl}${uri}`)
-}
-
-function buildAnthropicPayload(options: ChatCompletionOptions, model: string): Record<string, unknown> {
-  const system = options.messages
-    .filter((message) => message.role === 'system')
-    .map((message) => message.content)
-    .join('\n\n')
-    .trim()
-  const messages = options.messages
-    .filter((message) => message.role !== 'system')
-    .map((message) => ({
-      role: message.role === 'assistant' ? 'assistant' : 'user',
-      content: message.content,
-    }))
-
-  return {
-    model,
-    max_tokens: options.maxTokens ?? 800,
-    temperature: options.temperature ?? 0.3,
-    ...(system ? { system } : {}),
-    messages: messages.length
-      ? messages
-      : [
-          {
-            role: 'user',
-            content: system || '请继续。',
-          },
-        ],
-  }
-}
-
-function parseAnthropicContent(payload: AnthropicResponse): string {
-  return (
-    payload.content
-      ?.map((item) => item.text?.trim() ?? '')
-      .filter(Boolean)
-      .join('\n')
-      .trim() ?? ''
-  )
-}
-
-export async function callChatCompletion(options: ChatCompletionOptions): Promise<string> {
-  const config = getProviderConfig()
-
+export async function callChatCompletionWithUsage(
+  options: ChatCompletionOptions,
+): Promise<ChatCompletionResult> {
+  const config = getConfig()
   if (!config.apiKey) {
-    throw new Error(`当前未配置 ${config.provider} API Key。`)
+    throw new LanguageModelError('not_configured')
   }
 
-  if (!config.baseUrl) {
-    throw new Error(`当前未配置 ${config.provider} BASE_URL。`)
-  }
-
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? config.timeoutMs)
+  const startedAt = performance.now()
+  const abort = abortWith(options.signal, options.timeoutMs ?? config.timeoutMs)
+  let firstTokenMs: number | null = null
 
   try {
-    if (config.protocol === 'anthropic') {
-      const endpoint = getAnthropicEndpoint(config.baseUrl)
-      const response = await fetch(endpoint.href, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': config.apiKey,
-          'anthropic-version': process.env.MINIMAX_ANTHROPIC_VERSION ?? '2023-06-01',
-        },
-        body: JSON.stringify(buildAnthropicPayload(options, config.model)),
-        signal: controller.signal,
-      })
-
-      if (!response.ok) {
-        const raw = await response.text()
-        throw new Error(`${config.provider} API ${response.status}: ${raw.slice(0, 400)}`)
-      }
-
-      const payload = (await response.json()) as AnthropicResponse
-      const content = parseAnthropicContent(payload)
-
-      if (!content) {
-        throw new Error(`${config.provider} 返回了空内容。`)
-      }
-
-      return content
-    }
-
-    const body: Record<string, unknown> = {
-      model: config.model,
-      temperature: options.temperature ?? 0.3,
-      max_tokens: options.maxTokens ?? 800,
-      messages: options.messages,
-    }
-
-    if (options.jsonMode && config.supportsJsonMode) {
-      body.response_format = { type: 'json_object' }
-    }
-
-    const uri = '/chat/completions'
-    const endpoint = new URL(`${config.baseUrl}${uri}`)
-    if (config.provider === 'lanxin' && config.lanxinAuthMode === 'bearer') {
-      appendRequestId(endpoint)
-    }
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    }
-
-    if (config.provider === 'lanxin' && config.lanxinAuthMode === 'gateway') {
-      if (!config.lanxinAppId) {
-        throw new Error('当前未配置 lanxin APP_ID。')
-      }
-
-      Object.assign(
-        headers,
-        createGatewaySignedHeaders(config.lanxinAppId, config.apiKey, 'POST', endpoint.pathname),
-      )
-    } else {
-      headers.Authorization = `Bearer ${config.apiKey}`
-    }
-
-    const response = await fetch(endpoint.href, {
+    const response = await fetch(`${config.baseUrl}/chat/completions`, {
       method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: options.messages,
+        thinking: { type: 'disabled' },
+        temperature: options.temperature ?? 0.2,
+        max_tokens: options.maxTokens ?? 320,
+        stream: true,
+        stream_options: { include_usage: true },
+        ...(options.jsonMode ? { response_format: { type: 'json_object' } } : {}),
+      }),
+      signal: abort.signal,
     })
 
     if (!response.ok) {
-      const raw = await response.text()
-      throw new Error(`${config.provider} API ${response.status}: ${raw.slice(0, 400)}`)
+      if (response.status === 429 || response.status === 402) {
+        throw new LanguageModelError('rate_limited', response.status)
+      }
+      throw new LanguageModelError('upstream', response.status)
+    }
+    if (!response.body) {
+      throw new LanguageModelError('upstream')
     }
 
-    const payload = (await response.json()) as ChatResponse
-    const content = payload.choices?.[0]?.message?.content?.trim()
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let content = ''
+    let inputTokens = 0
+    let outputTokens = 0
 
-    if (!content) {
-      throw new Error(`${config.provider} 返回了空内容。`)
+    const acceptBlock = (block: string) => {
+      const chunk = parseSseBlock(block)
+      if (!chunk) {
+        return
+      }
+      const text = chunk.choices?.[0]?.delta?.content ?? ''
+      if (text) {
+        firstTokenMs ??= Math.round(performance.now() - startedAt)
+        content += text
+      }
+      inputTokens = chunk.usage?.prompt_tokens ?? inputTokens
+      outputTokens = chunk.usage?.completion_tokens ?? outputTokens
     }
 
-    return content
+    while (true) {
+      const { done, value } = await reader.read()
+      buffer += decoder.decode(value, { stream: !done })
+      const blocks = buffer.split(/\r?\n\r?\n/)
+      buffer = blocks.pop() ?? ''
+      blocks.forEach(acceptBlock)
+      if (done) {
+        if (buffer.trim()) {
+          acceptBlock(buffer)
+        }
+        break
+      }
+    }
+
+    const cleaned = content.trim()
+    if (!cleaned) {
+      throw new LanguageModelError('upstream')
+    }
+    const totalMs = Math.round(performance.now() - startedAt)
+    return {
+      content: cleaned,
+      usage: {
+        inputTokens,
+        outputTokens,
+        firstTokenMs,
+        totalMs,
+        estimatedCostCny: estimateCost(inputTokens, outputTokens),
+      },
+    }
+  } catch (error) {
+    if (error instanceof LanguageModelError) {
+      throw error
+    }
+    if (abort.signal.aborted) {
+      throw new LanguageModelError(abort.timedOut() ? 'timeout' : 'aborted')
+    }
+    throw new LanguageModelError('upstream')
   } finally {
-    clearTimeout(timeout)
+    abort.cleanup()
+  }
+}
+
+export async function callChatCompletion(options: ChatCompletionOptions): Promise<string> {
+  return (await callChatCompletionWithUsage(options)).content
+}
+
+function clamp(value: string, max: number): string {
+  return value.trim().slice(0, max)
+}
+
+function compactConversation(context: CookingContext): string[] {
+  const result: string[] = []
+  let remaining = 600
+  for (const turn of context.conversation.slice(-2).reverse()) {
+    if (remaining <= 0) {
+      break
+    }
+    const content = clamp(turn.content, remaining)
+    remaining -= content.length
+    result.unshift(`${turn.role === 'user' ? '用户' : '小白'}：${content}`)
+  }
+  return result
+}
+
+function buildCookingPrompt(context: CookingContext, question: string): string {
+  const timer = context.timer
+    ? `${context.timer.running ? '运行中' : '已暂停'}，剩余 ${Math.max(0, Math.round(context.timer.remainingSeconds))} 秒`
+    : '无'
+  return [
+    `菜谱：${clamp(context.recipeName, 80)}`,
+    `当前步骤：${context.currentStep.index + 1}/${Math.max(1, context.currentStep.total)} ${clamp(context.currentStep.title, 80)}`,
+    `当前动作：${clamp(context.currentStep.instruction, 400)}`,
+    `计时：${timer}`,
+    `缺失食材：${context.missingIngredients.slice(0, 10).map((item) => clamp(item, 30)).join('、') || '无'}`,
+    `安全提示：${context.safetyNotes.slice(0, 5).map((item) => clamp(item, 80)).join('；') || '无'}`,
+    ...compactConversation(context),
+    `问题：${question}`,
+  ].join('\n')
+}
+
+function cleanSpokenAnswer(value: string): string {
+  return value
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/[`*_#>()]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 250)
+}
+
+export class DeepSeekLanguageModelProvider implements LanguageModelProvider {
+  async answer(
+    context: CookingContext,
+    question: string,
+    signal: AbortSignal,
+  ): Promise<AssistantAnswer> {
+    const safeQuestion = clamp(question, 300)
+    if (!safeQuestion) {
+      throw new LanguageModelError('upstream')
+    }
+
+    const result = await callChatCompletionWithUsage({
+      messages: [
+        {
+          role: 'system',
+          content: [
+            '你是“小白下厨”的实时中文做饭教练。',
+            '不用 Markdown，只输出 80 至 250 个中文字符。',
+            '优先给出用户现在能立刻执行的动作、状态判断和必要的食品安全提醒。',
+            '仅依据给出的最小上下文回答；信息不足时明确采用保守做法，不要假装看见现场。',
+          ].join(''),
+        },
+        { role: 'user', content: buildCookingPrompt(context, safeQuestion) },
+      ],
+      temperature: 0.2,
+      maxTokens: Number(process.env.DEEPSEEK_MAX_OUTPUT_TOKENS ?? 320),
+      timeoutMs: Number(process.env.DEEPSEEK_TIMEOUT_MS ?? 12_000),
+      signal,
+    })
+
+    return {
+      answer: cleanSpokenAnswer(result.content),
+      provider: 'deepseek',
+      usage: result.usage,
+    }
   }
 }

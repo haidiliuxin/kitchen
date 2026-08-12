@@ -5,9 +5,7 @@ import { randomUUID } from 'node:crypto'
 import type { Recipe, Step } from '../src/types.js'
 import { callChatCompletion, getLlmRuntimeInfo, isLlmConfigured, type LlmProvider } from './llm.js'
 
-const requestTimeoutMs = Number(
-  process.env.LANXIN_TIMEOUT_MS ?? process.env.DEEPSEEK_TIMEOUT_MS ?? 180000,
-)
+const requestTimeoutMs = Number(process.env.DEEPSEEK_TIMEOUT_MS ?? 12_000)
 const importFetchTimeoutMs = Number(process.env.IMPORT_FETCH_TIMEOUT_MS ?? 15000)
 const externalTranscriptWebhookUrl = process.env.VIDEO_TRANSCRIPT_WEBHOOK_URL?.trim() ?? ''
 const ytDlpBinaryPath = process.env.YT_DLP_BINARY_PATH?.trim()

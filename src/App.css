@@ -6818,6 +6818,40 @@ button {
   line-height: 1.45;
 }
 
+.voice-status-card {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border-radius: 0.8rem;
+  background: rgba(255, 255, 255, 0.72);
+  color: #5d4037;
+  font-size: 0.86rem;
+}
+
+.voice-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.voice-status-card dl {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0.5rem 0 0;
+}
+
+.voice-status-card dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.voice-status-card dt,
+.voice-status-card dd {
+  margin: 0;
+}
+
 .coach-answer-panel {
   display: grid;
   min-height: 0;
