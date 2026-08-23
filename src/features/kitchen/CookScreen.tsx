@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import { formatTimer, speak, stopSpeak } from './shared.js'
-import type { ChatMessage, VoiceStatus } from './shared.js'
+import type { ChatMessage } from './shared.js'
+import type { VoiceSnapshot } from './voiceController.js'
 import type { Recipe, Step } from '../../types.js'
 import { buildMediaProxyUrl } from '../../lib/api.js'
 
@@ -9,8 +10,10 @@ type CookScreenProps = {
   currentStep: Step
   currentStepIndex: number
   voiceEnabled: boolean
-  voiceStatus: VoiceStatus
+  voiceSnapshot: VoiceSnapshot
+  voiceNotice: string
   autoPlayRequest: number
+  closeVideoRequest: number
   timerLeft: number
   timerVisible: boolean
   timerFinished: boolean
@@ -25,6 +28,8 @@ type CookScreenProps = {
   onToggleTimer: () => void
   onCancelTimer: () => void
   onToggleVoice: () => void
+  onSystemVoice: () => void
+  onStopVoice: () => void
   onCommandFeedback: (userText: string, assistantText: string) => void
   onPromptClick: (question: string) => void
   onAssistantInputChange: (value: string) => void
@@ -348,8 +353,10 @@ export function CookScreen({
   currentStep,
   currentStepIndex,
   voiceEnabled,
-  voiceStatus,
+  voiceSnapshot,
+  voiceNotice,
   autoPlayRequest,
+  closeVideoRequest,
   timerLeft,
   timerVisible,
   timerFinished,
@@ -364,6 +371,8 @@ export function CookScreen({
   onToggleTimer,
   onCancelTimer,
   onToggleVoice,
+  onSystemVoice,
+  onStopVoice,
   onCommandFeedback,
   onPromptClick,
   onAssistantInputChange,
@@ -418,6 +427,10 @@ export function CookScreen({
 
     return () => window.clearTimeout(timer)
   }, [currentStepIndex, coachHighlightToken])
+
+  useEffect(() => {
+    if (closeVideoRequest > 0) setIsVideoOverlayOpen(false)
+  }, [closeVideoRequest])
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -613,11 +626,35 @@ export function CookScreen({
           aria-pressed={voiceEnabled}
         >
           <span className="voice-toggle-dot" aria-hidden="true" />
-          <span>{voiceEnabled ? '正在听...' : '点击说话'}</span>
+          <span>{voiceEnabled ? '语音助手已开启' : '开启“小白小白”'}</span>
         </button>
-        {voiceStatus === 'unsupported' ? (
-          <p className="voice-support-note">当前设备不支持语音识别，可直接使用按钮和文字提问。</p>
-        ) : null}
+        <div className="voice-status-card" role="status">
+          <strong>{voiceSnapshot.state}</strong>
+          <span>唤醒词：小白小白</span>
+          {voiceSnapshot.partial ? <span>识别中：{voiceSnapshot.partial}</span> : null}
+          {voiceSnapshot.final ? <span>已识别：{voiceSnapshot.final}</span> : null}
+          {voiceNotice ? <span>{voiceNotice}</span> : null}
+          {voiceSnapshot.state === 'unsupported' ? (
+            <span>本地唤醒模型尚未授权/安装；不会使用云端持续监听。</span>
+          ) : null}
+          {voiceSnapshot.state === 'budget_limited' ? <span>今日云语音预算已用完，可使用系统识别。</span> : null}
+          <div className="voice-status-actions">
+            <button className="ghost-button small-button" onClick={onSystemVoice}>系统识别</button>
+            <button className="ghost-button small-button" onClick={onStopVoice}>停止语音/播放</button>
+          </div>
+          <details>
+            <summary>语音诊断</summary>
+            <dl>
+              <div><dt>Provider</dt><dd>{voiceSnapshot.provider}</dd></div>
+              <div><dt>降级</dt><dd>{voiceSnapshot.fallback || '无'}</dd></div>
+              <div><dt>权限</dt><dd>{voiceSnapshot.permission}</dd></div>
+              <div><dt>原生错误</dt><dd>{voiceSnapshot.nativeErrorCode || '无'}</dd></div>
+              <div><dt>错误类别</dt><dd>{voiceSnapshot.errorCategory || '无'}</dd></div>
+              <div><dt>最近延迟</dt><dd>{voiceSnapshot.latencyMs === null ? '—' : `${voiceSnapshot.latencyMs} ms`}</dd></div>
+              <div><dt>今日估算费用</dt><dd>¥{voiceSnapshot.estimatedCostCny.toFixed(4)}</dd></div>
+            </dl>
+          </details>
+        </div>
         <div className="voice-command-grid">
           <button className="prompt-chip" onClick={goToNextStep}>
             下一步

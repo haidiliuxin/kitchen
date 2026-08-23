@@ -16,6 +16,8 @@ tmp-test/
 android/.gradle
 android/app/build
 android/build
+android/app/libs/*.aar
+android/app/src/main/assets/kws/
 *.apk
 kitchen-helper.zip
 gradle-*.zip

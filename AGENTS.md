@@ -1,8 +1,12 @@
 # Agent Instructions
 
-Before modifying voice interaction, ASR, TTS, or vivo AIGC integration code, read:
+Before modifying voice interaction, ASR, or TTS, read:
 
-`docs/integrations/vivo-aigc-voice-integration.md`
+`docs/voice-architecture.md`
+
+Before modifying the retained vivo OCR integration, also read:
+
+`docs/legacy/vivo-aigc-voice-integration.md`
 
 Do not mock official API results in production flows.
 

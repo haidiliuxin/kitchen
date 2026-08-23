@@ -8,7 +8,8 @@ import type {
   Recipe,
   RecipeDraftPayload,
   RecipeFilters,
-  VoiceInterpretation,
+  AssistantAnswer,
+  CookingContext,
 } from '../types.js'
 
 export const API_BASE_URL_STORAGE_KEY = 'kitchen-helper:api-base-url'
@@ -135,17 +136,6 @@ export type DemoCoachReplyResponse = {
   model?: string
 }
 
-export type DemoAsrResponse = {
-  success: true
-  text: string
-  raw: unknown
-} | {
-  success: false
-  error_type: string
-  message: string
-  raw?: unknown
-}
-
 const bundledApiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').trim()
 
 function normalizeApiBaseUrl(value: string): string {
@@ -179,7 +169,7 @@ export function resetConfiguredApiBaseUrl(): string {
   return setConfiguredApiBaseUrl('')
 }
 
-function buildApiUrl(path: string): string {
+export function buildApiUrl(path: string): string {
   const apiBaseUrl = getConfiguredApiBaseUrl()
 
   if (!apiBaseUrl) {
@@ -245,6 +235,10 @@ function getAuthSession(): AuthSession | null {
   }
 }
 
+export function getAuthToken(): string | null {
+  return getAuthSession()?.token ?? null
+}
+
 export async function testApiServer(baseUrl = getConfiguredApiBaseUrl()): Promise<{
   status: string
 }> {
@@ -260,12 +254,12 @@ export async function testApiServer(baseUrl = getConfiguredApiBaseUrl()): Promis
 
 async function requestJson<T>(input: string, init?: RequestInit): Promise<T> {
   const response = await fetch(buildApiUrl(input), {
+    ...init,
     headers: {
       'Content-Type': 'application/json',
       ...(getAuthSession()?.token ? { Authorization: `Bearer ${getAuthSession()!.token}` } : {}),
       ...(init?.headers ?? {}),
     },
-    ...init,
   })
 
   const payload = await readJsonResponse<T & { message?: string }>(response)
@@ -281,7 +275,6 @@ async function requestJson<T>(input: string, init?: RequestInit): Promise<T> {
 
   return payload
 }
-
 export async function loginOrRegister(identifier: string, password: string): Promise<AuthSession> {
   const session = await requestJson<AuthSession>('/api/auth/login', {
     method: 'POST',
@@ -370,24 +363,24 @@ export async function updateRecipeVisibility(
 }
 
 export async function askAssistant(
-  recipeId: string,
-  stepIndex: number,
+  context: CookingContext,
   question: string,
-): Promise<string> {
-  const payload = await requestJson<{ answer: string }>('/api/assistant/reply', {
+  signal?: AbortSignal,
+): Promise<AssistantAnswer> {
+  return requestJson<AssistantAnswer>('/api/assistant/reply', {
     method: 'POST',
-    body: JSON.stringify({ recipeId, stepIndex, question }),
+    body: JSON.stringify({ context, question }),
+    signal,
   })
-
-  return payload.answer
 }
 
-export async function interpretVoiceTranscript(
-  transcript: string,
-): Promise<VoiceInterpretation> {
-  return requestJson<VoiceInterpretation>('/api/voice/interpret', {
+export async function createVoiceSessionTicket(deviceId: string): Promise<{
+  ticket: string
+  expiresInMs: number
+}> {
+  return requestJson('/api/voice/session-ticket', {
     method: 'POST',
-    body: JSON.stringify({ transcript }),
+    body: JSON.stringify({ deviceId }),
   })
 }
 
@@ -452,36 +445,6 @@ export async function analyzeLocalVideo(file: File, durationSeconds?: number): P
       message = payload.message
     }
     throw new Error(message)
-  }
-
-  return payload
-}
-
-export async function transcribeDemoAudio(audio: Blob, mockText?: string): Promise<DemoAsrResponse> {
-  const formData = new FormData()
-  formData.set('audio', audio, 'voice.pcm')
-  if (mockText?.trim()) {
-    formData.set('mockText', mockText.trim())
-  }
-
-  const response = await fetch(buildApiUrl('/api/demo/asr'), {
-    method: 'POST',
-    headers: {
-      ...(getAuthSession()?.token ? { Authorization: `Bearer ${getAuthSession()!.token}` } : {}),
-    },
-    body: formData,
-  })
-
-  const payload = await readJsonResponse<DemoAsrResponse>(response).catch((error: unknown) => ({
-    success: false,
-    error_type: 'ASR_REQUEST_FAILED',
-    message: error instanceof Error ? error.message : 'ASR 识别失败。',
-  }) satisfies DemoAsrResponse)
-
-  if (!response.ok) {
-    return payload.success === false
-      ? payload
-      : { success: false, error_type: 'ASR_REQUEST_FAILED', message: 'ASR 识别失败。' }
   }
 
   return payload

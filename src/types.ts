@@ -159,10 +159,39 @@ export type RecipeFilters = {
   timeLimit?: '全部' | number
 }
 
-export type VoiceInterpretation = {
-  activated: boolean
-  wakeWords: string[]
-  transcript: string
-  cleanedTranscript: string
-  matchedWakeWord: string | null
+export type CookingConversationTurn = {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export type CookingContext = {
+  recipeName: string
+  currentStep: {
+    index: number
+    total: number
+    title: string
+    instruction: string
+  }
+  timer: {
+    remainingSeconds: number
+    running: boolean
+  } | null
+  missingIngredients: string[]
+  safetyNotes: string[]
+  conversation: CookingConversationTurn[]
+}
+
+export type AssistantUsage = {
+  inputTokens: number
+  outputTokens: number
+  firstTokenMs: number | null
+  totalMs: number
+  estimatedCostCny: number
+}
+
+export type AssistantAnswer = {
+  answer: string
+  provider: 'deepseek' | 'local'
+  usage: AssistantUsage
+  errorCategory?: 'budget_limited' | 'not_configured' | 'rate_limited' | 'upstream' | 'timeout' | 'aborted'
 }

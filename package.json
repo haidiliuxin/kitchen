@@ -18,6 +18,7 @@
     "whisper:start": "powershell -ExecutionPolicy Bypass -File tools/whisper-service/start.ps1",
     "tunnel:start": "powershell -ExecutionPolicy Bypass -File tools/cloudflared-tunnel/start.ps1",
     "lint": "eslint .",
+    "test": "tsx --test tests/**/*.test.ts",
     "preview": "vite preview",
     "start": "node server-dist/server/index.js"
   },

@@ -1,9 +1,9 @@
 import 'dotenv/config'
 import { existsSync } from 'node:fs'
+import { createServer } from 'node:http'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import express from 'express'
-import { AsrError, parseMultipartAudioUpload, transcribeShortAudio } from './asr.js'
 import { getUserByToken, registerOrLoginUser, revokeAuthToken } from './auth.js'
 import type { AuthUser } from './auth.js'
 import { getAiRuntimeInfo, getKitchenCoachReply } from './ai.js'
@@ -13,6 +13,7 @@ import { analyzeLocalVideoUpload } from './localVideoAnalyze.js'
 import { createDatabase, databaseFilePath } from './database.js'
 import { importRecipeFromUrl } from './importer.js'
 import { getPublicUploadRoot } from './videoProcessing.js'
+import { createVoiceServices } from './voiceServer.js'
 import {
   createPrepPlan,
   getCookingHistory,
@@ -24,16 +25,12 @@ import {
   saveUserRecipe,
   updateRecipeVisibility,
 } from './repository.js'
-import type { Difficulty, Recipe } from '../src/types.js'
+import type { CookingContext, Difficulty, Recipe } from '../src/types.js'
 
 const port = Number(process.env.PORT ?? 8787)
 const host = process.env.HOST ?? '0.0.0.0'
 const app = express()
 const db = createDatabase()
-const configuredWakeWords = (process.env.VOICE_WAKE_WORDS ?? '小白下厨,小白教练')
-  .split(/[,\n]/)
-  .map((item) => item.trim())
-  .filter(Boolean)
 
 function getBearerToken(request: express.Request): string | null {
   const authorization = request.headers.authorization
@@ -70,6 +67,65 @@ function requireRequestUser(request: express.Request, response: express.Response
 
   return user
 }
+
+function parseCookingContext(value: unknown): CookingContext | null {
+  if (!value || typeof value !== 'object') return null
+  const context = value as Record<string, unknown>
+  const currentStep = context.currentStep && typeof context.currentStep === 'object'
+    ? context.currentStep as Record<string, unknown>
+    : null
+  if (
+    typeof context.recipeName !== 'string'
+    || !currentStep
+    || typeof currentStep.index !== 'number'
+    || typeof currentStep.total !== 'number'
+    || typeof currentStep.title !== 'string'
+    || typeof currentStep.instruction !== 'string'
+  ) return null
+
+  const timerRecord = context.timer && typeof context.timer === 'object'
+    ? context.timer as Record<string, unknown>
+    : null
+  const timer = timerRecord
+    && typeof timerRecord.remainingSeconds === 'number'
+    && typeof timerRecord.running === 'boolean'
+    ? {
+        remainingSeconds: Math.max(0, Math.min(86_400, timerRecord.remainingSeconds)),
+        running: timerRecord.running,
+      }
+    : null
+  const strings = (input: unknown, max: number) => Array.isArray(input)
+    ? input.filter((item): item is string => typeof item === 'string').slice(0, max)
+    : []
+  const conversation = Array.isArray(context.conversation)
+    ? context.conversation
+        .map((item) => {
+          if (!item || typeof item !== 'object') return null
+          const turn = item as Record<string, unknown>
+          return (turn.role === 'user' || turn.role === 'assistant') && typeof turn.content === 'string'
+            ? { role: turn.role, content: turn.content.slice(0, 600) }
+            : null
+        })
+        .filter((item): item is { role: 'user' | 'assistant'; content: string } => item !== null)
+        .slice(-2)
+    : []
+
+  return {
+    recipeName: context.recipeName.slice(0, 80),
+    currentStep: {
+      index: Math.max(0, Math.round(currentStep.index)),
+      total: Math.max(1, Math.round(currentStep.total)),
+      title: currentStep.title.slice(0, 80),
+      instruction: currentStep.instruction.slice(0, 400),
+    },
+    timer,
+    missingIngredients: strings(context.missingIngredients, 10).map((item) => item.slice(0, 30)),
+    safetyNotes: strings(context.safetyNotes, 5).map((item) => item.slice(0, 80)),
+    conversation,
+  }
+}
+
+const voiceServices = createVoiceServices({ getUser: getRequestUser })
 
 function createUserRecipeFromPayload(payload: unknown, ownerUserId: string): Recipe {
   const record = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
@@ -170,42 +226,6 @@ function createUserRecipeFromPayload(payload: unknown, ownerUserId: string): Rec
   }
 }
 
-function normalizeSpeechText(value: string): string {
-  return value.replace(/[，。！？、；：,.!?;:"'“”‘’\s]/g, '').toLowerCase()
-}
-
-function interpretVoiceTranscript(transcript: string) {
-  const trimmedTranscript = transcript.trim()
-  const normalizedTranscript = normalizeSpeechText(trimmedTranscript)
-  const matchedWakeWord = configuredWakeWords.find((wakeWord) =>
-    normalizedTranscript.includes(normalizeSpeechText(wakeWord)),
-  )
-
-  if (!matchedWakeWord) {
-    return {
-      activated: false,
-      wakeWords: configuredWakeWords,
-      transcript: trimmedTranscript,
-      cleanedTranscript: '',
-      matchedWakeWord: null,
-    }
-  }
-
-  const matchedWakeWordNormalized = normalizeSpeechText(matchedWakeWord)
-  const cleanedTranscript = trimmedTranscript
-    .replace(new RegExp(matchedWakeWord, 'g'), '')
-    .trim()
-  const cleanedNormalizedTranscript = normalizedTranscript.replace(matchedWakeWordNormalized, '').trim()
-
-  return {
-    activated: true,
-    wakeWords: configuredWakeWords,
-    transcript: trimmedTranscript,
-    cleanedTranscript: cleanedTranscript || cleanedNormalizedTranscript,
-    matchedWakeWord,
-  }
-}
-
 app.use((request, response, next) => {
   const origin = typeof request.headers.origin === 'string' ? request.headers.origin : '*'
 
@@ -232,7 +252,12 @@ app.get('/api/health', (_request, response) => {
     databaseFilePath,
     ai: getAiRuntimeInfo(),
     voice: {
-      wakeWords: configuredWakeWords,
+      wakeWord: '小白小白',
+      kwsModelBundled: false,
+      asrConfigured: Boolean(process.env.DOUBAO_ASR_API_KEY?.trim()
+        || (process.env.DOUBAO_SPEECH_APP_ID?.trim() && process.env.DOUBAO_SPEECH_ACCESS_TOKEN?.trim())),
+      ttsConfigured: Boolean(process.env.DOUBAO_SPEECH_APP_ID?.trim()
+        && process.env.DOUBAO_SPEECH_ACCESS_TOKEN?.trim()),
     },
     timestamp: new Date().toISOString(),
   })
@@ -266,92 +291,6 @@ app.post(
     } catch (error) {
       response.status(400).json({
         message: error instanceof Error ? error.message : '本地视频解析失败。',
-      })
-    }
-  },
-)
-
-app.post('/api/demo/coach-reply', async (request, response) => {
-  const recipeName = request.body?.recipeName
-  const currentStep = request.body?.currentStep
-  const userQuestion = request.body?.userQuestion
-
-  if (typeof userQuestion !== 'string' || !userQuestion.trim()) {
-    response.status(400).json({ message: '请先输入问题。' })
-    return
-  }
-
-  if (!currentStep || typeof currentStep !== 'object') {
-    response.status(400).json({ message: 'currentStep 是必填项。' })
-    return
-  }
-
-  const stepRecord = currentStep as Record<string, unknown>
-  const result = await getDemoCoachReply({
-    recipeName: typeof recipeName === 'string' ? recipeName : '当前菜谱',
-    currentStep: {
-      title: typeof stepRecord.title === 'string' ? stepRecord.title : '当前步骤',
-      instruction: typeof stepRecord.instruction === 'string' ? stepRecord.instruction : '',
-      tips: Array.isArray(stepRecord.tips)
-        ? stepRecord.tips.filter((item): item is string => typeof item === 'string')
-        : [],
-      commonMistakes: Array.isArray(stepRecord.commonMistakes)
-        ? stepRecord.commonMistakes.filter((item): item is string => typeof item === 'string')
-        : [],
-    },
-    userQuestion,
-  })
-
-  response.json(result)
-})
-
-app.post(
-  '/api/demo/asr',
-  express.raw({ type: () => true, limit: '20mb' }),
-  async (request, response) => {
-    const contentType = request.headers['content-type']
-    if (typeof contentType !== 'string' || !contentType.includes('multipart/form-data')) {
-      response.status(400).json({ success: false, error_type: 'BAD_REQUEST', message: '请使用 FormData 上传短音频。' })
-      return
-    }
-
-    try {
-      const { file, fields } = parseMultipartAudioUpload(
-        contentType,
-        Buffer.isBuffer(request.body) ? request.body : Buffer.from([]),
-      )
-      const mockText = fields.mockText || request.headers['x-demo-asr-text']
-      if (
-        typeof mockText === 'string'
-        && mockText.trim()
-        && (process.env.NODE_ENV !== 'production' || process.env.ASR_ALLOW_MOCK === 'true')
-      ) {
-        response.json({ success: true, text: mockText.trim(), raw: { mock: true } })
-        return
-      }
-
-      if (!file) {
-        response.status(400).json({ success: false, error_type: 'BAD_REQUEST', message: '没有收到音频文件。' })
-        return
-      }
-
-      const result = await transcribeShortAudio(file.buffer)
-      response.json({ success: true, text: result.text, raw: result.raw })
-    } catch (error) {
-      if (error instanceof AsrError) {
-        response.status(error.type === 'ASR_MISSING_CONFIG' ? 503 : 502).json({
-          success: false,
-          error_type: error.type,
-          message: error.message,
-          raw: error.raw,
-        })
-        return
-      }
-
-      response.status(500).json({
-        success: false,
-        error_type: 'ASR_REQUEST_FAILED',
-        message: error instanceof Error ? error.message : 'ASR 识别失败。',
       })
     }
   },
@@ -548,16 +487,8 @@ app.get('/api/recommendations', (request, response) => {
   response.json(getRecommendations(db, excludeRecipeId, userId))
 })
 
-app.post('/api/voice/interpret', (request, response) => {
-  const transcript = request.body?.transcript
-
-  if (typeof transcript !== 'string') {
-    response.status(400).json({ message: 'transcript 是必填项。' })
-    return
-  }
-
-  response.json(interpretVoiceTranscript(transcript))
-})
+app.post('/api/voice/session-ticket', voiceServices.sessionTicket)
+app.post('/api/voice/tts', (request, response) => void voiceServices.tts(request, response))
 
 app.get('/api/media/proxy', async (request, response) => {
   const rawUrl = typeof request.query.url === 'string' ? request.query.url : ''
@@ -714,40 +645,40 @@ app.post('/api/imports/analyze', async (request, response) => {
 })
 
 app.post('/api/assistant/reply', async (request, response) => {
-  const recipeId = request.body?.recipeId
-  const stepIndex = request.body?.stepIndex
   const question = request.body?.question
-
-  if (typeof recipeId !== 'string' || typeof question !== 'string') {
-    response.status(400).json({ message: 'recipeId 和 question 是必填项。' })
+  const context = parseCookingContext(request.body?.context)
+  if (typeof question !== 'string' || !question.trim() || question.length > 300 || !context) {
+    response.status(400).json({ message: 'context 或 question 不合法。' })
     return
   }
-
-  if (typeof stepIndex !== 'number' || !Number.isInteger(stepIndex)) {
-    response.status(400).json({ message: 'stepIndex 必须是整数。' })
-    return
-  }
-
-  const recipe = getRecipeById(db, recipeId, getRequestUserId(request))
-  if (!recipe) {
-    response.status(404).json({ message: '菜谱不存在。' })
-    return
-  }
-
-  const step = recipe.steps[stepIndex]
-  if (!step) {
-    response.status(400).json({ message: '步骤不存在。' })
-    return
-  }
-
-  const result = await getKitchenCoachReply({
-    recipe,
-    step,
-    stepIndex,
-    question,
-  })
-
+  const controller = new AbortController()
+  request.once('aborted', () => controller.abort())
+  response.once('close', () => controller.abort())
+  const result = await getKitchenCoachReply(context, question.trim(), controller.signal)
   response.json(result)
+})
+
+app.post('/api/demo/coach-reply', async (request, response) => {
+  const currentStep = request.body?.currentStep
+  const userQuestion = request.body?.userQuestion
+  if (!currentStep || typeof currentStep !== 'object'
+    || typeof userQuestion !== 'string' || !userQuestion.trim()) {
+    response.status(400).json({ message: 'currentStep 和 userQuestion 是必填项。' })
+    return
+  }
+  const step = currentStep as Record<string, unknown>
+  response.json(await getDemoCoachReply({
+    recipeName: typeof request.body?.recipeName === 'string' ? request.body.recipeName : '当前菜谱',
+    currentStep: {
+      title: typeof step.title === 'string' ? step.title : '当前步骤',
+      instruction: typeof step.instruction === 'string' ? step.instruction : '',
+      tips: Array.isArray(step.tips) ? step.tips.filter((item): item is string => typeof item === 'string') : [],
+      commonMistakes: Array.isArray(step.commonMistakes)
+        ? step.commonMistakes.filter((item): item is string => typeof item === 'string')
+        : [],
+    },
+    userQuestion,
+  }))
 })
 
 const distDir = path.join(process.cwd(), 'dist')
@@ -758,6 +689,8 @@ if (existsSync(distDir)) {
   })
 }
 
-app.listen(port, host, () => {
+const server = createServer(app)
+voiceServices.attach(server)
+server.listen(port, host, () => {
   console.log(`Kitchen server listening on http://${host}:${port}`)
 })

@@ -10,6 +10,9 @@ android {
         versionCode 1
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
@@ -31,7 +34,7 @@ repositories {
 }
 
 dependencies {
-    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation fileTree(include: ['*.jar', '*.aar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
@@ -41,6 +44,64 @@ dependencies {
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
 }
+
+def sherpaAar = file('libs/sherpa-onnx-1.13.5.aar')
+def sherpaAarSha256 = '6419cd8bc983e0c4fab06067f0fe0313fdc0f7103818ac1e7a08d50787b7a82b'
+
+tasks.register('verifyOptionalSherpaAar') {
+    doLast {
+        def sha256 = { input ->
+            def digest = java.security.MessageDigest.getInstance('SHA-256')
+            input.withInputStream { stream ->
+                byte[] buffer = new byte[8192]
+                for (int read = stream.read(buffer); read != -1; read = stream.read(buffer)) {
+                    digest.update(buffer, 0, read)
+                }
+            }
+            digest.digest().collect { String.format('%02x', it) }.join()
+        }
+        if (sherpaAar.exists()) {
+            if (sherpaAar.length() != 49095090L) {
+                throw new GradleException("Unexpected sherpa AAR size: ${sherpaAar.length()}")
+            }
+            def actual = sha256(sherpaAar)
+            if (actual != sherpaAarSha256) {
+                throw new GradleException("Unexpected sherpa AAR SHA-256: ${actual}")
+            }
+        } else {
+            logger.lifecycle('sherpa-onnx AAR is not installed; Kitchen will build with MODEL_MISSING support.')
+        }
+
+        def manifestFile = file('src/main/assets/kws/model-manifest.json')
+        if (!manifestFile.exists()) {
+            logger.lifecycle('KWS model manifest is not installed; no model assets will be packaged.')
+            return
+        }
+        if (!sherpaAar.exists()) {
+            throw new GradleException('KWS model assets require the verified sherpa-onnx AAR.')
+        }
+        def manifest = new groovy.json.JsonSlurper().parse(manifestFile)
+        if (manifest.sherpaVersion != '1.13.5'
+                || manifest.modelId != 'sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20'
+                || !(manifest.files instanceof List)
+                || manifest.files.size() < 6) {
+            throw new GradleException('Invalid KWS model manifest.')
+        }
+        manifest.files.each { entry ->
+            def relative = entry.path?.toString()
+            def expected = entry.sha256?.toString()?.toLowerCase()
+            if (!relative || relative.contains('..') || !(expected ==~ /[0-9a-f]{64}/)) {
+                throw new GradleException('Invalid KWS model manifest entry.')
+            }
+            def asset = file("src/main/assets/kws/${relative}")
+            if (!asset.isFile() || sha256(asset) != expected) {
+                throw new GradleException("KWS model asset verification failed: ${relative}")
+            }
+        }
+    }
+}
+
+preBuild.dependsOn verifyOptionalSherpaAar
 
 apply from: 'capacitor.build.gradle'
 

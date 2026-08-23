@@ -39,17 +39,11 @@ const vivoOcrUri = '/ocr/general_recognition'
 const vivoOcrBusinessId = '1990173156ceb8a09eee80c293135279'
 
 function getVivoAigcAppId(): string {
-  return process.env.VIVO_AIGC_APP_ID?.trim() || process.env.OCR_VIVO_APP_ID?.trim() || process.env.LANXIN_APP_ID?.trim() || ''
+  return process.env.OCR_VIVO_APP_ID?.trim() || ''
 }
 
 function getVivoAigcAppKey(): string {
-  return (
-    process.env.VIVO_AIGC_APP_KEY?.trim() ||
-    process.env.OCR_VIVO_APP_KEY?.trim() ||
-    process.env.LANXIN_API_KEY?.trim() ||
-    process.env.LANXIN_APP_KEY?.trim() ||
-    ''
-  )
+  return process.env.OCR_VIVO_APP_KEY?.trim() || ''
 }
 
 function createNonce(length = 8): string {
@@ -250,7 +244,7 @@ async function recognizeWithVivoAigcBearerOcr(frameUrl: string): Promise<OcrResu
       text: '',
       confidence: 0,
       raw: null,
-      error: 'VIVO_AIGC_APP_ID/VIVO_AIGC_APP_KEY is not configured.',
+      error: 'OCR_VIVO_APP_ID/OCR_VIVO_APP_KEY is not configured.',
     }
   }
 
@@ -269,7 +263,7 @@ async function recognizeWithVivoAigcBearerOcr(frameUrl: string): Promise<OcrResu
     const body = new URLSearchParams({
       image,
       pos: process.env.OCR_VIVO_POS?.trim() || '2',
-      businessid: process.env.VIVO_AIGC_BUSINESS_ID?.trim() || process.env.OCR_VIVO_BUSINESS_ID?.trim() || `aigc${appId}`,
+      businessid: process.env.OCR_VIVO_BUSINESS_ID?.trim() || `aigc${appId}`,
     })
     const endpoint = process.env.OCR_VIVO_BASE_URL?.trim() || 'http://api-ai.vivo.com.cn'
     const url = new URL(`${endpoint.replace(/\/$/, '')}${vivoOcrUri}`)
